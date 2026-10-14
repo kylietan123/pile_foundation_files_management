@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="桩基工程全过程文档管理与质量预警平台">
+  <title>桩基工程全过程管理平台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="authView" class="auth-shell">
+    <section class="brand-panel">
+      <div class="brand-mark" aria-hidden="true">
+        <span class="brand-mark-core"></span>
+        <span class="brand-mark-line line-a"></span>
+        <span class="brand-mark-line line-b"></span>
+        <span class="brand-mark-line line-c"></span>
+      </div>
+      <div class="brand-copy">
+        <p class="eyebrow">PILE FOUNDATION · LIFECYCLE</p>
+        <h1>桩基工程<br>全过程管理平台</h1>
+        <p class="brand-subtitle">以文档流驱动业务流，覆盖从前期调研到运维监测的七个阶段。</p>
+      </div>
+      <div class="phase-ribbon">
+        <span>调研</span><span>勘察</span><span>设计试桩</span><span>设计</span><span class="active">施工</span><span>验收</span><span>运维</span>
+      </div>
+      <div class="brand-note">
+        <span class="shield-icon">✓</span>
+        <div>
+          <strong>责任单位上传 · 参建单位只读</strong>
+          <p>所有上传动作均记录单位、人员、时间和 SHA-256 指纹。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="auth-card">
+      <div class="auth-card-inner">
+        <div class="mobile-brand">桩基工程全过程管理平台</div>
+        <p class="eyebrow accent">SECURE WORKSPACE</p>
+        <h2>登录项目工作台</h2>
+        <p class="muted">选择演示账号，快速验证不同参建单位的上传与查看权限。</p>
+
+        <form id="loginForm" class="login-form">
+          <label>
+            <span>账号</span>
+            <input id="username" name="username" autocomplete="username" placeholder="请输入账号" required>
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" value="Demo@123456" required>
+          </label>
+          <button class="button primary large" type="submit">
+            <span>进入工作台</span>
+            <span class="button-arrow">→</span>
+          </button>
+          <p id="loginError" class="form-error" role="alert"></p>
+        </form>
+
+        <div class="demo-section">
+          <div class="section-label"><span>演示身份</span></div>
+          <div id="demoAccounts" class="demo-grid">
+            <button type="button" data-user="contractor"><strong>总包</strong><span>可上传 5.1</span></button>
+            <button type="button" data-user="pile_subcontractor"><strong>桩基分包</strong><span>可上传 5.2</span></button>
+            <button type="button" data-user="supervisor"><strong>监理</strong><span>可上传 5.3</span></button>
+            <button type="button" data-user="testing"><strong>检测监测</strong><span>可上传 5.4</span></button>
+            <button type="button" data-user="owner_viewer"><strong>建设单位</strong><span>全程只读</span></button>
+            <button type="button" data-user="admin"><strong>系统管理员</strong><span>全部权限</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="appView" class="app-shell" hidden>
+    <header class="topbar">
+      <button class="icon-button mobile-menu" id="mobileMenuButton" type="button" aria-label="打开菜单">☰</button>
+      <div class="topbar-brand">
+        <span class="mini-mark"></span>
+        <div>
+          <strong>桩基工程全过程管理</strong>
+          <span id="projectMeta">项目加载中</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="security-pill"><span></span>受控访问</span>
+        <button class="profile-button" id="profileButton" type="button">
+          <span id="userAvatar">用</span>
+          <span class="profile-copy">
+            <strong id="userName">用户</strong>
+            <small id="userUnit">参建单位</small>
+          </span>
+          <span class="chevron">⌄</span>
+        </button>
+        <div id="profileMenu" class="profile-menu" hidden>
+          <div id="profileRoleList"></div>
+          <button id="logoutButton" type="button">退出登录</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="shell-body">
+      <aside id="sidebar" class="sidebar">
+        <div class="project-switcher">
+          <label for="projectSelect">当前项目</label>
+          <select id="projectSelect"></select>
+        </div>
+        <nav id="phaseNav" class="phase-nav" aria-label="项目阶段"></nav>
+        <div class="sidebar-footer">
+          <div class="storage-label">
+            <span>平台运行模式</span>
+            <strong>原型环境</strong>
+          </div>
+          <p>正式部署请启用 HTTPS、对象存储与备份策略。</p>
+        </div>
+      </aside>
+
+      <main id="mainContent" class="main-content">
+        <div class="loading-state"><span class="spinner"></span>正在加载项目数据…</div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modalRoot" class="modal-root" hidden></div>
+  <div id="toastRoot" class="toast-root" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

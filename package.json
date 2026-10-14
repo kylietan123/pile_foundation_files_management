@@ -1,0 +1,16 @@
+{
+  "name": "pile-foundation-lifecycle-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "桩基工程全过程文档管理平台原型",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "db:info": "node scripts/db-info.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
