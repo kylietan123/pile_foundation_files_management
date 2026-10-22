@@ -1,5 +1,5 @@
 /** 接口方法。每个方法对应后端一个端点，改动需同步 backend/app/api/。 */
-import { get, getFull, http, patch, post, postFull } from './http'
+import { del, get, getFull, http, patch, post, postFull } from './http'
 import type {
   AffectedPile,
   AIAnswer,
@@ -7,8 +7,15 @@ import type {
   AIConversation,
   AIMessage,
   AIProviderStatus,
+  AdminOptions,
+  AdminOverview,
+  AdminPermissionAssignment,
+  AdminUser,
+  AdminUserCreateIn,
+  AdminUserUpdateIn,
   ChangeCreateIn,
   ChangeInfo,
+  ChangePasswordIn,
   CurrentUser,
   Deliverable,
   DeliveryCheck,
@@ -32,6 +39,9 @@ import type {
   ProjectCreateIn,
   ProjectInfo,
   ProjectUpdateIn,
+  ProfileUpdateIn,
+  ProjectMemberCandidate,
+  ProjectMemberCreateIn,
   ProjectMemberInfo,
   StageOption,
   StageResponsibility,
@@ -41,6 +51,23 @@ import type {
   WorkflowTrace,
 } from './types'
 
+// ---------------- 系统管理控制台 ----------------
+
+export const adminApi = {
+  overview: () => get<AdminOverview>('/admin/overview'),
+  options: () => get<AdminOptions>('/admin/options'),
+  users: (keyword?: string) =>
+    get<AdminUser[]>('/admin/users', keyword ? { keyword } : undefined),
+  createUser: (body: AdminUserCreateIn) => post<AdminUser>('/admin/users', body),
+  updateUser: (id: string, body: AdminUserUpdateIn) => patch<AdminUser>(`/admin/users/${id}`, body),
+  resetPassword: (id: string, password: string) =>
+    post<{ user_id: string; message: string }>(`/admin/users/${id}/reset-password`, { password }),
+  assignPermission: (id: string, body: AdminPermissionAssignment) =>
+    post<AdminUser>(`/admin/users/${id}/permissions`, body),
+  revokePermission: (id: string, memberId: string) =>
+    del<AdminUser>(`/admin/users/${id}/permissions/${memberId}`),
+}
+
 // ---------------- 认证 ----------------
 
 export const authApi = {
@@ -49,6 +76,9 @@ export const authApi = {
   /** 当前用户 + 所属单位 + 在每个项目上的角色与权限范围 */
   me: () => get<CurrentUser>('/auth/me'),
   stageOptions: () => get<StageOption[]>('/auth/stage-options'),
+  updateMe: (body: ProfileUpdateIn) => patch<CurrentUser>('/auth/me', body),
+  changePassword: (body: ChangePasswordIn) =>
+    post<{ message: string }>('/auth/change-password', body),
 }
 
 // ---------------- 项目 ----------------
@@ -61,6 +91,11 @@ export const projectApi = {
   create: (body: ProjectCreateIn) => post<ProjectInfo>('/projects', body),
   update: (id: string, body: ProjectUpdateIn) => patch<ProjectInfo>(`/projects/${id}`, body),
   members: (id: string) => get<ProjectMemberInfo[]>(`/projects/${id}/members`),
+  approve: (id: string) => post<ProjectInfo>(`/projects/${id}/approve`),
+  memberCandidates: (id: string) =>
+    get<ProjectMemberCandidate[]>(`/projects/${id}/member-candidates`),
+  addMember: (id: string, body: ProjectMemberCreateIn) =>
+    post<{ message: string; user_id: string; unit_code: string }>(`/projects/${id}/members`, body),
 }
 
 // ---------------- 标准文档清单 ----------------

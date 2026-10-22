@@ -13,6 +13,7 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
     verify_password,
 )
 from app.models.enums import (
@@ -25,13 +26,15 @@ from app.models.enums import (
     StageCode,
     UnitCode,
 )
-from app.models.org import AppUser, Organization
+from app.models.org import AppUser, Organization, UserOrg
 from app.models.project import Project
 from app.schemas import (
     ApiResponse,
     CurrentUserOut,
+    ChangePasswordIn,
     LoginRequest,
     MembershipOut,
+    ProfileUpdateIn,
     OrgBrief,
     RefreshRequest,
     TokenPair,
@@ -109,6 +112,43 @@ def refresh(body: RefreshRequest, db: DbSession) -> ApiResponse[TokenPair]:
     )
 
 
+@router.patch("/me", response_model=ApiResponse[CurrentUserOut], summary="修改个人资料")
+def update_me(
+    body: ProfileUpdateIn,
+    db: DbSession,
+    user: CurrentUser,
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> ApiResponse[CurrentUserOut]:
+    """用户修改自己的姓名、电话、邮箱和职称。
+
+    姓名、职称、用户名、工号、所属单位和项目权限仍由系统管理员维护。
+    """
+    for key in ("phone", "email"):
+        value = getattr(body, key)
+        if value is not None:
+            setattr(user, key, value.strip() if isinstance(value, str) else value)
+    db.commit()
+    db.refresh(user)
+    return me(db=db, user=user, principal=principal)
+
+
+@router.post("/change-password", response_model=ApiResponse[dict], summary="修改登录密码")
+def change_password(body: ChangePasswordIn, db: DbSession, user: CurrentUser) -> ApiResponse[dict]:
+    if not verify_password(body.old_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": 2004, "message": "原密码不正确"},
+        )
+    if body.old_password == body.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": 2005, "message": "新密码不能与原密码相同"},
+        )
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    return ApiResponse(data={"message": "密码修改成功"})
+
+
 @router.get("/me", response_model=ApiResponse[CurrentUserOut], summary="当前用户与权限范围")
 def me(
     db: DbSession,
@@ -120,11 +160,23 @@ def me(
     前端用它决定显示哪些菜单。
     注意：这只是体验优化；真正的拦截在后端每个接口上。
     """
-    org_ids = resolve_org_ids(db, user.id)
-    orgs: list[OrgBrief] = []
-    if org_ids:
-        rows = db.execute(select(Organization).where(Organization.id.in_(org_ids))).scalars().all()
-        orgs = [OrgBrief.model_validate(o) for o in rows]
+    links = db.execute(
+        select(UserOrg, Organization)
+        .join(Organization, Organization.id == UserOrg.org_id)
+        .where(UserOrg.user_id == user.id)
+        .order_by(UserOrg.is_primary.desc(), UserOrg.sort)
+    ).all()
+    orgs = [
+        OrgBrief(
+            id=org.id,
+            name=org.name,
+            short_name=org.short_name,
+            org_type=org.org_type,
+            is_internal=org.is_internal,
+            is_unit_admin=link.is_unit_admin,
+        )
+        for link, org in links
+    ]
 
     # 组装成员关系（带项目名，便于前端展示"我在哪些项目里以什么单位参与"）
     memberships: list[MembershipOut] = []

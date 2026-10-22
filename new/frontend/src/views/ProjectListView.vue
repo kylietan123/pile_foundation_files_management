@@ -40,6 +40,9 @@ onMounted(() => {
 })
 
 const sum = computed(() => projectStore.summary())
+const canCreateProject = computed(() =>
+  auth.user?.orgs?.some((org) => org.org_type === 'OWNER'),
+)
 
 const donutStyle = computed(() => {
   const total = Math.max(sum.value.total, 1)
@@ -49,6 +52,16 @@ const donutStyle = computed(() => {
     background: `conic-gradient(#1a6bb0 0 ${inProgress}%, #0ea5a4 ${inProgress}% ${archivedEnd}%, #d9e1ea ${archivedEnd}% 100%)`,
   }
 })
+
+const pendingApprovals = computed(() =>
+  projectStore.projects.filter(
+    (project) =>
+      project.status === 'PREPARING' &&
+      auth.user?.orgs?.some(
+        (org) => org.id === project.owner_org_id && org.is_unit_admin,
+      ),
+  ),
+)
 
 const projects = computed(() => {
   const key = search.value.trim().toLowerCase()
@@ -60,6 +73,16 @@ const projects = computed(() => {
 
 function openProject(projectId: string) {
   router.push({ name: 'project-detail', params: { id: projectId } })
+}
+
+async function approveProject(projectId: string) {
+  try {
+    await projectApi.approve(projectId)
+    ElMessage.success('项目已审核通过')
+    await projectStore.fetchMyProjects()
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  }
 }
 
 function openCreate() {
@@ -79,7 +102,7 @@ async function submitProject() {
       name: form.name.trim(),
       short_name: form.short_name?.trim() || form.name.trim(),
     })
-    ElMessage.success('项目已创建，已建立 7 个阶段')
+    ElMessage.success('项目已创建，等待建设单位管理员审核')
     await projectStore.fetchMyProjects()
     dialogVisible.value = false
     router.push({ name: 'project-detail', params: { id: created.id } })
@@ -101,7 +124,7 @@ async function submitProject() {
           {{ auth.user?.name }}，欢迎回来。管理你参与的项目与全过程工程文档。
         </p>
       </div>
-      <el-button type="primary" size="large" @click="openCreate">
+      <el-button v-if="canCreateProject" type="primary" size="large" @click="openCreate">
         <el-icon><Plus /></el-icon>
         新建项目
       </el-button>
@@ -147,6 +170,33 @@ async function submitProject() {
       </div>
     </section>
 
+    <section v-if="pendingApprovals.length" class="approval-panel app-card">
+      <div class="approval-head">
+        <div>
+          <strong>待我审核</strong>
+          <span>建设单位管理员需要处理的新项目</span>
+        </div>
+        <el-tag type="warning" effect="plain">{{ pendingApprovals.length }} 项</el-tag>
+      </div>
+      <div class="approval-grid">
+        <div
+          v-for="project in pendingApprovals"
+          :key="project.id"
+          class="approval-card"
+          @click="openProject(project.id)"
+        >
+          <div class="approval-info">
+            <span>{{ project.project_no }}</span>
+            <b>{{ project.name }}</b>
+            <small>{{ project.location || project.city || '地区未填写' }}</small>
+          </div>
+          <el-button type="warning" size="small" @click.stop="approveProject(project.id)">
+            审核通过
+          </el-button>
+        </div>
+      </div>
+    </section>
+
     <section class="toolbar app-card">
       <div>
         <strong>我的项目</strong>
@@ -183,7 +233,10 @@ async function submitProject() {
     </div>
 
     <el-empty v-else description="没有匹配的项目">
-      <el-button type="primary" @click="openCreate">创建第一个项目</el-button>
+      <el-button v-if="canCreateProject" type="primary" @click="openCreate">
+        创建第一个项目
+      </el-button>
+      <span v-else class="no-create-hint">只有建设单位可以新建项目</span>
     </el-empty>
 
     <el-dialog v-model="dialogVisible" title="新建项目" width="560px" destroy-on-close>
@@ -386,6 +439,68 @@ async function submitProject() {
   line-height: 1.1;
 }
 
+.approval-panel {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-color: #f0d7a4;
+  background: #fffdf7;
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.approval-head strong {
+  margin-right: 10px;
+  color: #7a5410;
+  font-size: 15px;
+}
+
+.approval-head span {
+  color: #9b7a3d;
+  font-size: 12.5px;
+}
+
+.approval-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.approval-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #f0dfbc;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.approval-info {
+  min-width: 0;
+}
+
+.approval-info span,
+.approval-info small {
+  display: block;
+  color: #9a8a70;
+  font-size: 11px;
+}
+
+.approval-info b {
+  display: block;
+  margin: 3px 0;
+  color: #4c3d26;
+  font-size: 13.5px;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -406,6 +521,11 @@ async function submitProject() {
 
 .search {
   width: 260px;
+}
+
+.no-create-hint {
+  color: #8793a5;
+  font-size: 12.5px;
 }
 
 .skeleton {
@@ -492,6 +612,9 @@ async function submitProject() {
 }
 
 @media (max-width: 720px) {
+  .approval-grid {
+    grid-template-columns: 1fr;
+  }
   .workbench-head {
     align-items: flex-start;
     flex-direction: column;

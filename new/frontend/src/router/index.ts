@@ -17,7 +17,22 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        redirect: '/projects',
+        redirect: () => {
+          const auth = useAuthStore()
+          return auth.user?.is_superuser ? { name: 'admin' } : { name: 'projects' }
+        },
+      },
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/ProfileView.vue'),
+        meta: { title: '个人设置' },
+      },
+      {
+        path: 'admin',
+        name: 'admin',
+        component: () => import('@/views/AdminConsoleView.vue'),
+        meta: { title: '权限管理', adminOnly: true },
       },
       {
         path: 'projects',
@@ -102,8 +117,9 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
   if (to.meta.public) {
-    // 已登录还去登录页 → 直接回首页
-    if (auth.isLoggedIn) return { name: 'projects' }
+    if (auth.isLoggedIn) {
+      return auth.user?.is_superuser ? { name: 'admin' } : { name: 'projects' }
+    }
     return true
   }
 
@@ -119,6 +135,9 @@ router.beforeEach(async (to) => {
       auth.logout()
       return { name: 'login', query: { redirect: to.fullPath } }
     }
+  }
+  if (to.meta.adminOnly && !auth.canManageStaff) {
+    return { name: 'projects' }
   }
   return true
 })

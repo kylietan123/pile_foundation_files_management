@@ -29,15 +29,18 @@ from app.models.enums import (
     StageCode,
     StageStatus,
     UnitCode,
+    primary_unit_of_stage,
     stages_of_unit,
 )
 from app.models.issue import Issue
-from app.models.org import Organization, UserOrg
+from app.models.org import AppUser, Organization, UserOrg
 from app.models.project import Project, ProjectMember, ProjectStage
 from app.models.workflow import WorkflowTask
 from app.schemas import (
     ApiResponse,
     ProjectCreateIn,
+    ProjectMemberCandidateOut,
+    ProjectMemberCreateIn,
     ProjectOut,
     ProjectUpdateIn,
     StageOut,
@@ -126,6 +129,7 @@ def _to_out(
         current_stage_code=project.current_stage_code,
         current_stage_label=_stage_label(project.current_stage_code),
         status=project.status,
+        owner_org_id=project.owner_org_id,
         plan_start=project.plan_start,
         plan_end=project.plan_end,
         actual_start=project.actual_start,
@@ -173,6 +177,88 @@ ORG_TYPE_TO_UNIT: dict[str, str] = {
 }
 
 
+UNIT_TO_ORG_TYPE: dict[str, str] = {unit: org_type for org_type, unit in ORG_TYPE_TO_UNIT.items()}
+
+
+def _stage_manager_link(db: DbSession, unit_code: str) -> tuple[UserOrg, Organization] | None:
+    org_type = UNIT_TO_ORG_TYPE.get(unit_code)
+    if not org_type:
+        return None
+    org = db.execute(
+        select(Organization).where(Organization.org_type == org_type, Organization.active.is_(True))
+    ).scalars().first()
+    if org is None:
+        return None
+    link = db.execute(
+        select(UserOrg)
+        .join(AppUser, AppUser.id == UserOrg.user_id)
+        .where(
+            UserOrg.org_id == org.id,
+            UserOrg.is_unit_admin.is_(True),
+            AppUser.is_active.is_(True),
+        )
+        .order_by(UserOrg.is_primary.desc())
+    ).scalars().first()
+    if link is None:
+        return None
+    return link, org
+
+
+def _managed_stage_codes(db: DbSession, project_id: str, user_id: str) -> set[str]:
+    return set(
+        db.execute(
+            select(ProjectStage.stage_code).where(
+                ProjectStage.project_id == project_id,
+                ProjectStage.owner_user_id == user_id,
+            )
+        ).scalars().all()
+    )
+
+
+def _sync_stage_manager_memberships(db: DbSession, project: Project, stages: list[ProjectStage]) -> None:
+    """审核通过时，按阶段主办单位自动加入单位管理员并设置阶段负责人。"""
+    managed: dict[str, set[str]] = {}
+    manager_links: dict[str, tuple[UserOrg, Organization]] = {}
+    for stage in stages:
+        unit_code = primary_unit_of_stage(stage.stage_code)
+        if not unit_code:
+            continue
+        found = _stage_manager_link(db, unit_code)
+        if found is None:
+            continue
+        link, org = found
+        stage.owner_user_id = link.user_id
+        managed.setdefault(unit_code, set()).add(stage.stage_code)
+        manager_links[unit_code] = (link, org)
+
+    for unit_code, stage_codes in managed.items():
+        link, _org = manager_links[unit_code]
+        member = db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == link.user_id,
+                ProjectMember.role_code == unit_code,
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            db.add(
+                ProjectMember(
+                    project_id=project.id,
+                    user_id=link.user_id,
+                    org_id=link.org_id,
+                    role_code=unit_code,
+                    stage_scope=",".join(sorted(stage_codes)),
+                    data_scope=DataScope.PROJECT.value,
+                    granted_by=project.created_by,
+                    granted_at=datetime.now(timezone.utc),
+                    remark="项目审核通过后自动加入的阶段负责人",
+                )
+            )
+        elif member.stage_scope and member.stage_scope.upper() != "ALL":
+            existing = {x.strip() for x in member.stage_scope.split(",") if x.strip()}
+            member.stage_scope = ",".join(sorted(existing | stage_codes))
+
+
 def _next_project_no(db: DbSession) -> str:
     """生成 ZJ-年份-三位序号，避免用户看见 UUID 式项目编号。"""
     prefix = f"ZJ-{date.today().year}-"
@@ -210,6 +296,42 @@ def _ensure_project_admin(project: Project, principal) -> None:
     )
 
 
+def _primary_user_org(db: DbSession, user_id: str) -> UserOrg | None:
+    return db.execute(
+        select(UserOrg).where(UserOrg.user_id == user_id).order_by(UserOrg.is_primary.desc(), UserOrg.sort)
+    ).scalars().first()
+
+
+def _is_unit_admin(db: DbSession, user_id: str, org_id: str | None) -> bool:
+    if not org_id:
+        return False
+    return db.execute(
+        select(UserOrg).where(
+            UserOrg.user_id == user_id,
+            UserOrg.org_id == org_id,
+            UserOrg.is_unit_admin.is_(True),
+        )
+    ).scalar_one_or_none() is not None
+
+
+def _member_management_scope(db: DbSession, project: Project, principal) -> tuple[bool, set[str]]:
+    """返回 (是否建设单位管理员, 可管理的阶段集合)。"""
+    is_owner_manager = (
+        project.created_by == principal.user_id
+        or _is_unit_admin(db, principal.user_id, project.owner_org_id)
+        or principal.is_superuser
+    )
+    if is_owner_manager:
+        return True, {s.value for s in StageCode}
+    managed = _managed_stage_codes(db, project.id, principal.user_id)
+    if managed:
+        return False, managed
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"code": ERR_NO_ROLE, "message": "只有建设单位管理员或阶段负责人可以分配项目权限"},
+    )
+
+
 @router.post("", response_model=ApiResponse[ProjectOut], summary="新建项目", status_code=201)
 def create_project(
     body: ProjectCreateIn,
@@ -222,6 +344,11 @@ def create_project(
     创建人会自动成为本项目的主单位成员，因此能立即进入项目阶段页。
     """
     org, unit_code = _creator_context(db, principal)
+    if unit_code != UnitCode.OWNER.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": ERR_NO_ROLE, "message": "只有建设单位可以新建项目"},
+        )
     project = Project(
         project_no=_next_project_no(db),
         name=body.name.strip(),
@@ -234,20 +361,28 @@ def create_project(
         project_type=body.project_type or "桩基工程",
         scale_desc=body.scale_desc,
         description=body.description,
-        current_stage_code=StageCode.PRE_SURVEY.value,
-        status=ProjectStatus.IN_PROGRESS.value,
+        current_stage_code=body.start_stage.value,
+        status=ProjectStatus.PREPARING.value,
         created_by=principal.user_id,
     )
     db.add(project)
     db.flush()
 
+    stage_order = list(StageCode)
+    start_idx = stage_order.index(body.start_stage)
     stages: list[ProjectStage] = []
-    for idx, stage_code in enumerate(StageCode, start=1):
+    for idx, stage_code in enumerate(stage_order, start=1):
+        if idx - 1 < start_idx:
+            stage_status, progress = StageStatus.COMPLETED, 100
+        elif idx - 1 == start_idx:
+            stage_status, progress = StageStatus.IN_PROGRESS, 10
+        else:
+            stage_status, progress = StageStatus.NOT_STARTED, 0
         ps = ProjectStage(
             project_id=project.id,
             stage_code=stage_code.value,
-            status=(StageStatus.IN_PROGRESS if idx == 1 else StageStatus.NOT_STARTED).value,
-            progress=10 if idx == 1 else 0,
+            status=stage_status.value,
+            progress=progress,
             sort=idx,
         )
         db.add(ps)
@@ -261,10 +396,39 @@ def create_project(
             role_code=unit_code,
             stage_scope="ALL",
             data_scope=DataScope.PROJECT.value,
+            responsibility_override=(
+                f"{StageCode.CONSTRUCTION.value}=PRIMARY"
+                if unit_code == UnitCode.OWNER.value and body.owner_primary_construction
+                else None
+            ),
             granted_by=principal.user_id,
             granted_at=datetime.now(timezone.utc),
         )
     )
+
+    # 建设单位项目创建后必须能被本单位管理员看到并审核。
+    # 管理员不一定是项目创建人，因此创建项目时自动补齐管理员成员关系。
+    if org is not None and unit_code == UnitCode.OWNER.value:
+        owner_admins = db.execute(
+            select(UserOrg).where(
+                UserOrg.org_id == org.id,
+                UserOrg.is_unit_admin.is_(True),
+                UserOrg.user_id != principal.user_id,
+            )
+        ).scalars().all()
+        for link in owner_admins:
+            db.add(
+                ProjectMember(
+                    project_id=project.id,
+                    user_id=link.user_id,
+                    org_id=org.id,
+                    role_code=UnitCode.OWNER.value,
+                    stage_scope="ALL",
+                    data_scope=DataScope.PROJECT.value,
+                    granted_by=principal.user_id,
+                    granted_at=datetime.now(timezone.utc),
+                )
+            )
     db.commit()
     db.refresh(project)
     refreshed = build_principal(db, principal.user)
@@ -385,6 +549,146 @@ def get_project(project_id: str, db: DbSession, principal: CurrentPrincipal) -> 
     ).scalars().all()
 
     return ApiResponse(data=_to_out(project, principal, stages=stages))
+
+
+@router.post("/{project_id}/approve", response_model=ApiResponse[ProjectOut], summary="建设单位管理员审核通过项目")
+def approve_project(project_id: str, db: DbSession, principal: CurrentPrincipal) -> ApiResponse[ProjectOut]:
+    require_project_view(project_id, principal)
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail={"code": 4004, "message": "项目不存在"})
+    if not principal.is_superuser and not _is_unit_admin(db, principal.user_id, project.owner_org_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": ERR_NO_ROLE, "message": "只有建设单位管理员可以审核项目"},
+        )
+    if project.status != ProjectStatus.PREPARING.value:
+        raise HTTPException(status_code=400, detail={"code": 4000, "message": "项目当前不需要审核"})
+    project.status = ProjectStatus.IN_PROGRESS.value
+    stages = db.execute(
+        select(ProjectStage).where(ProjectStage.project_id == project_id).order_by(ProjectStage.sort)
+    ).scalars().all()
+    _sync_stage_manager_memberships(db, project, stages)
+    db.commit()
+    db.refresh(project)
+    return ApiResponse(data=_to_out(project, principal, stages=stages))
+
+
+@router.get(
+    "/{project_id}/member-candidates",
+    response_model=ApiResponse[list[ProjectMemberCandidateOut]],
+    summary="可添加的项目参与人员",
+)
+def member_candidates(
+    project_id: str, db: DbSession, principal: CurrentPrincipal
+) -> ApiResponse[list[ProjectMemberCandidateOut]]:
+    require_project_view(project_id, principal)
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail={"code": 4004, "message": "项目不存在"})
+    is_owner_manager, managed_stages = _member_management_scope(db, project, principal)
+    manager_units = principal.units_in(project_id)
+    existing = set(
+        db.execute(
+            select(ProjectMember.user_id).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.revoked_at.is_(None),
+            )
+        ).scalars().all()
+    )
+    rows = db.execute(
+        select(AppUser, UserOrg, Organization)
+        .join(UserOrg, UserOrg.user_id == AppUser.id)
+        .join(Organization, Organization.id == UserOrg.org_id)
+        .where(AppUser.is_active.is_(True))
+        .order_by(Organization.name, AppUser.name)
+    ).all()
+    data: list[ProjectMemberCandidateOut] = []
+    for user, link, org in rows:
+        if user.id in existing:
+            continue
+        unit = ORG_TYPE_TO_UNIT.get(org.org_type, UnitCode.ADMIN.value)
+        if not is_owner_manager and unit not in manager_units:
+            continue
+        data.append(
+            ProjectMemberCandidateOut(
+                user_id=user.id,
+                username=user.username,
+                name=user.name,
+                employee_no=user.employee_no,
+                org_id=org.id,
+                org_name=org.name,
+                org_type=org.org_type,
+                unit_code=unit,
+                unit_label=_unit_label(unit),
+                is_unit_admin=link.is_unit_admin,
+            )
+        )
+    return ApiResponse(data=data)
+
+
+@router.post("/{project_id}/members", response_model=ApiResponse[dict], summary="添加项目参与人员")
+def add_project_member(
+    project_id: str,
+    body: ProjectMemberCreateIn,
+    db: DbSession,
+    principal: CurrentPrincipal,
+) -> ApiResponse[dict]:
+    require_project_view(project_id, principal)
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail={"code": 4004, "message": "项目不存在"})
+    is_owner_manager, managed_stages = _member_management_scope(db, project, principal)
+    if project.status == ProjectStatus.PREPARING.value:
+        raise HTTPException(status_code=400, detail={"code": 4000, "message": "项目审核通过后才能添加其他参与单位"})
+    user = db.get(AppUser, body.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=404, detail={"code": 4004, "message": "员工账号不存在或已禁用"})
+    user_org = _primary_user_org(db, user.id)
+    org = db.get(Organization, user_org.org_id) if user_org else None
+    if org is None:
+        raise HTTPException(status_code=400, detail={"code": 4000, "message": "员工没有所属单位"})
+    unit_code = body.unit_code.value if body.unit_code else ORG_TYPE_TO_UNIT.get(org.org_type, UnitCode.ADMIN.value)
+    stage_codes = [s.value for s in body.stage_scope] if body.stage_scope else [s.value for s in StageCode]
+    if not is_owner_manager:
+        if unit_code not in principal.units_in(project_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": ERR_NO_ROLE, "message": "阶段负责人只能添加本单位的员工"},
+            )
+        if not body.stage_scope or not set(stage_codes).issubset(managed_stages):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": ERR_NO_ROLE, "message": "阶段负责人只能分配自己负责的阶段"},
+            )
+    override = (
+        ",".join(f"{code}={body.responsibility.value}" for code in stage_codes)
+        if body.responsibility is not None
+        else None
+    )
+    member = db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.role_code == unit_code,
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        member = ProjectMember(
+            project_id=project_id,
+            user_id=user.id,
+            org_id=org.id,
+            role_code=unit_code,
+            data_scope=DataScope.PROJECT.value,
+            granted_by=principal.user_id,
+            granted_at=datetime.now(timezone.utc),
+        )
+        db.add(member)
+    member.stage_scope = ",".join(stage_codes) if body.stage_scope else "ALL"
+    member.responsibility_override = override
+    member.revoked_at = None
+    db.commit()
+    return ApiResponse(data={"message": f"已将 {user.name} 添加到项目", "user_id": user.id, "unit_code": unit_code})
 
 
 @router.get("/{project_id}/members", response_model=ApiResponse[list[dict]], summary="项目参与人")

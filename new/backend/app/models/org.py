@@ -100,6 +100,9 @@ class UserOrg(Base, IdMixin, TimestampMixin):
     )
 
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_unit_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, comment="部门管理员（领导），负责本部门账号与项目权限管理"
+    )
     title_in_org: Mapped[str | None] = mapped_column(String(64))
     sort: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date)

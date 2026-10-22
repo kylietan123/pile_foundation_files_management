@@ -26,12 +26,12 @@ const rules: FormRules = {
 }
 
 const demos = [
-  { username: 'ouyuxin', name: '欧雨欣', desc: '设计单位' },
+  { username: 'ouyuxin', name: '欧雨欣', desc: '设计单位 · 部门管理员' },
   { username: 'chenkaili', name: '陈铠俐', desc: '建设单位' },
   { username: 'haoxirui', name: '郝兮睿', desc: '勘察 / 设计试桩' },
   { username: 'sunqi', name: '孙七', desc: '总包单位' },
   { username: 'wangwu', name: '王五', desc: '监理单位' },
-  { username: 'admin', name: '系统管理员', desc: '全局查看' },
+  { username: 'admin', name: '系统管理员', desc: '总管理员' },
 ]
 
 function fill(username: string) {
@@ -48,7 +48,8 @@ async function onSubmit() {
   try {
     await auth.login(form.username, form.password)
     ElMessage.success(`欢迎，${auth.user?.name}`)
-    router.push((route.query.redirect as string) || '/projects')
+    const redirect = route.query.redirect as string | undefined
+    router.push(redirect || (auth.user?.is_superuser ? '/admin' : '/projects'))
   } catch (e) {
     ElMessage.error(explainApiError(e))
   } finally {
