@@ -127,6 +127,12 @@ class ProjectMember(Base, IdMixin, TimestampMixin):
     # DataScope
     data_scope: Mapped[str] = mapped_column(String(32), default="PROJECT", nullable=False)
 
+    # 项目级责任覆盖，格式如 "CONSTRUCTION=PRIMARY"，逗号分隔多个阶段。
+    # 为空时完全按《管理流程》矩阵推导，不影响标准项目。
+    responsibility_override: Mapped[str | None] = mapped_column(
+        String(300), comment="阶段码=责任等级，逗号分隔；仅个别项目需要偏离矩阵时使用"
+    )
+
     valid_from: Mapped[date | None] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date)
 

@@ -12,12 +12,18 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 import { catalogApi, projectApi } from '@/api'
 import { explainApiError } from '@/api/http'
-import type { CatalogDocument, ProjectMemberInfo } from '@/api/types'
+import type {
+  CatalogDocument,
+  ProjectMemberCandidate,
+  ProjectMemberCreateIn,
+  ProjectMemberInfo,
+} from '@/api/types'
 import { PROJECT_STATUS_LABEL, STAGE_LABEL, STAGE_ORDER, UNIT_LABEL } from '@/api/types'
-import type { UnitCode } from '@/api/types'
+import type { Responsibility, StageCode, UnitCode } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectStore } from '@/stores/project'
 import { formatDate } from '@/utils/format'
@@ -32,6 +38,15 @@ const members = ref<ProjectMemberInfo[]>([])
 const membersError = ref<string | null>(null)
 const catalog = ref<CatalogDocument[]>([])
 const catalogError = ref<string | null>(null)
+const memberDialogVisible = ref(false)
+const memberCandidates = ref<ProjectMemberCandidate[]>([])
+const memberSaving = ref(false)
+const memberForm = ref<ProjectMemberCreateIn>({
+  user_id: '',
+  unit_code: null,
+  stage_scope: [],
+  responsibility: null,
+})
 
 onMounted(async () => {
   await projectStore.fetchDetail(projectId.value)
@@ -48,6 +63,34 @@ onMounted(async () => {
 })
 
 const p = computed(() => projectStore.current)
+
+const isOwnerUnitAdmin = computed(() =>
+  auth.user?.orgs?.some(
+    (org) => org.id === p.value?.owner_org_id && org.is_unit_admin,
+  ),
+)
+
+const canApproveProject = computed(
+  () => p.value?.status === 'PREPARING' && isOwnerUnitAdmin.value,
+)
+
+const managedStageCodes = computed<StageCode[]>(() =>
+  (p.value?.stages || [])
+    .filter((stage) => stage.owner_user_id === auth.user?.id)
+    .map((stage) => stage.stage_code),
+)
+
+const canManageProjectMembers = computed(
+  () =>
+    p.value?.status !== 'PREPARING' &&
+    (isOwnerUnitAdmin.value ||
+      myMembership.value?.unit_code === 'OWNER' ||
+      managedStageCodes.value.length > 0),
+)
+
+const assignableStages = computed<StageCode[]>(() =>
+  isOwnerUnitAdmin.value ? STAGE_ORDER : managedStageCodes.value,
+)
 
 const currentCatalog = computed(() => {
   const code = p.value?.current_stage_code
@@ -108,8 +151,52 @@ const permHint = computed(() => {
 })
 
 function enterStage(code: string) {
+  if (p.value?.status === 'PREPARING') return
   if (!canEnterStage(code)) return
   router.push({ name: 'project-detail', params: { id: projectId.value }, query: { stage: code } })
+}
+
+async function approveProject() {
+  try {
+    await projectApi.approve(projectId.value)
+    ElMessage.success('项目审核通过，现在可以添加其他参与单位')
+    await projectStore.fetchDetail(projectId.value)
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  }
+}
+
+async function openMemberDialog() {
+  try {
+    memberCandidates.value = await projectApi.memberCandidates(projectId.value)
+    memberForm.value = { user_id: '', unit_code: null, stage_scope: [], responsibility: null }
+    memberDialogVisible.value = true
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  }
+}
+
+function onCandidateChange(userId: string) {
+  const candidate = memberCandidates.value.find((item) => item.user_id === userId)
+  memberForm.value.unit_code = (candidate?.unit_code as UnitCode | undefined) || null
+}
+
+async function addProjectMember() {
+  if (!memberForm.value.user_id) {
+    ElMessage.warning('请选择参与人员')
+    return
+  }
+  memberSaving.value = true
+  try {
+    await projectApi.addMember(projectId.value, memberForm.value)
+    ElMessage.success('参与单位人员已添加')
+    memberDialogVisible.value = false
+    members.value = await projectApi.members(projectId.value)
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  } finally {
+    memberSaving.value = false
+  }
 }
 
 /**
@@ -182,15 +269,41 @@ const activity = computed(() => {
           <el-tag :type="p.status === 'IN_PROGRESS' ? 'primary' : 'info'" effect="dark" size="small">
             {{ PROJECT_STATUS_LABEL[p.status] }}
           </el-tag>
+          <el-button
+            v-if="canApproveProject"
+            size="small"
+            type="warning"
+            @click="approveProject"
+          >
+            审核通过
+          </el-button>
+          <el-button
+            v-if="canManageProjectMembers"
+            size="small"
+            type="success"
+            plain
+            @click="openMemberDialog"
+          >
+            添加参与单位
+          </el-button>
           <el-button size="small" plain @click="router.push({ name: 'projects' })">
             切换项目
           </el-button>
         </div>
       </div>
 
+      <el-alert
+        v-if="p.status === 'PREPARING'"
+        title="项目待建设单位管理员审核。审核通过后，项目负责人才能添加其他参与单位。"
+        type="warning"
+        show-icon
+        :closable="false"
+        style="margin-top: 12px"
+      />
+
       <!-- 工作入口：当前阶段的可用功能。
            没有这段，点了「设计」阶段也不知道该去哪。 -->
-      <div v-if="canEnterStage(p.current_stage_code)" class="entries app-card">
+      <div v-if="p.status !== 'PREPARING' && canEnterStage(p.current_stage_code)" class="entries app-card">
         <span class="el-label">进入工作：</span>
         <el-button
           v-if="p.current_stage_code === 'DESIGN' || canEnterStage('DESIGN')"
@@ -268,7 +381,7 @@ const activity = computed(() => {
           :class="{
             done: stageState(code).status === 'COMPLETED',
             current: code === p.current_stage_code,
-            locked: !canEnterStage(code),
+            locked: p.status === 'PREPARING' || !canEnterStage(code),
             mine: isPrimaryOfStage(code),
           }"
           :title="
@@ -474,6 +587,69 @@ const activity = computed(() => {
         <b>权限如何生效：</b>{{ permHint.text }}
       </div>
     </template>
+
+    <el-dialog v-model="memberDialogVisible" title="添加参与单位人员" width="620px">
+      <el-form label-position="top" :model="memberForm">
+        <el-form-item label="参与人员 *">
+          <el-select
+            v-model="memberForm.user_id"
+            filterable
+            style="width: 100%"
+            placeholder="选择员工账号"
+            @change="onCandidateChange"
+          >
+            <el-option
+              v-for="item in memberCandidates"
+              :key="item.user_id"
+              :label="`${item.name} · ${item.org_name} · ${item.unit_label}`"
+              :value="item.user_id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="参与单位">
+          <el-input
+            :model-value="UNIT_LABEL[memberForm.unit_code as UnitCode] || ''"
+            disabled
+          />
+        </el-form-item>
+        <el-form-item label="可见阶段">
+          <el-select
+            v-model="memberForm.stage_scope"
+            multiple
+            collapse-tags
+            clearable
+            style="width: 100%"
+            placeholder="不选表示全部阶段"
+          >
+            <el-option
+              v-for="stage in assignableStages"
+              :key="stage"
+              :label="STAGE_LABEL[stage]"
+              :value="stage"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="阶段责任覆盖">
+          <el-select
+            v-model="memberForm.responsibility"
+            clearable
+            style="width: 100%"
+            placeholder="不覆盖则按标准矩阵" 
+          >
+            <el-option label="主要责任" value="PRIMARY" />
+            <el-option label="次要责任" value="RELATED" />
+            <el-option label="参与" value="PARTICIPANT" />
+            <el-option label="审查" value="VERIFIER" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="memberDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="memberSaving" @click="addProjectMember">
+          添加到项目
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 

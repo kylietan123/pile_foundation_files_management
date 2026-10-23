@@ -30,6 +30,15 @@ export const useAuthStore = defineStore('auth', () => {
   /** 我参与的全部项目 id */
   const myProjectIds = computed(() => user.value?.memberships.map((m) => m.project_id) ?? [])
 
+  /** 我担任管理员的部门（单位） */
+  const managedOrgs = computed(() => user.value?.orgs.filter((o) => o.is_unit_admin) ?? [])
+
+  /** 是否是部门管理员 */
+  const isUnitAdmin = computed(() => managedOrgs.value.length > 0)
+
+  /** 是否能进入权限管理页面：总管理员或部门管理员 */
+  const canManageStaff = computed(() => !!user.value?.is_superuser || isUnitAdmin.value)
+
   function membershipOf(projectId: string): Membership | undefined {
     return user.value?.memberships.find((m) => m.project_id === projectId)
   }
@@ -96,6 +105,9 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     isLoggedIn,
     myProjectIds,
+    managedOrgs,
+    isUnitAdmin,
+    canManageStaff,
     membershipOf,
     unitIn,
     visibleStages,

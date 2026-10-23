@@ -56,6 +56,20 @@ from app.models.workflow import WorkflowTemplate
 
 DEMO_PASSWORD = "Tjad@2026"
 
+# 每个参与单位指定一名管理员（领导），负责本单位相关审核与管理。
+UNIT_ADMIN_USERNAMES = {
+    "chenkaili",
+    "ouyuxin",
+    "ligong",
+    "zhaosi",
+    "sunqi",
+    "zhouba",
+    "wangwu",
+    "wujiu",
+    "zhengshi",
+    "gongwu",
+}
+
 USERS = [
     # username,      姓名,     单位key,          职称,                    是否超管
     #
@@ -433,8 +447,18 @@ def seed_users(db, org_map: dict[str, Organization]) -> dict[str, AppUser]:
             select(UserOrg).where(UserOrg.user_id == u.id, UserOrg.org_id == org.id)
         ).scalar_one_or_none()
         if link is None:
-            db.add(UserOrg(user_id=u.id, org_id=org.id, is_primary=True, title_in_org=title))
+            db.add(
+                UserOrg(
+                    user_id=u.id,
+                    org_id=org.id,
+                    is_primary=True,
+                    is_unit_admin=username in UNIT_ADMIN_USERNAMES,
+                    title_in_org=title,
+                )
+            )
             db.flush()
+        else:
+            link.is_unit_admin = username in UNIT_ADMIN_USERNAMES
     return user_map
 
 

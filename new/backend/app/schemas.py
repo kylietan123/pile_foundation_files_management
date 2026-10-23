@@ -23,10 +23,12 @@ from app.models.enums import (
     IssueActionType,
     IssueSource,
     IssueStatus,
+    Responsibility,
     SecretLevel,
     Severity,
     StageCode,
     TaskAction,
+    UnitCode,
     VerifyStatus,
 )
 
@@ -98,6 +100,7 @@ class OrgBrief(BaseModel):
     short_name: str | None = None
     org_type: str
     is_internal: bool = False
+    is_unit_admin: bool = False
 
 
 class MembershipOut(BaseModel):
@@ -119,6 +122,23 @@ class MembershipOut(BaseModel):
     responsibility: str | None = None
     responsibility_label: str | None = None
     actions: list[str] = Field(default_factory=list)
+
+
+class ProfileUpdateIn(BaseModel):
+    """用户自己可以维护的个人资料。
+
+    姓名、职称、工号、所属单位和项目权限均由系统管理员维护。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=128)
+
+
+class ChangePasswordIn(BaseModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class CurrentUserOut(BaseModel):
@@ -172,6 +192,8 @@ class ProjectCreateIn(BaseModel):
     project_type: str | None = Field(default=None, max_length=64)
     scale_desc: str | None = Field(default=None, max_length=200)
     description: str | None = None
+    start_stage: StageCode = StageCode.PRE_SURVEY
+    owner_primary_construction: bool = False
 
 
 class ProjectUpdateIn(BaseModel):
@@ -211,6 +233,7 @@ class ProjectOut(BaseModel):
     current_stage_code: str
     current_stage_label: str | None = None
     status: str
+    owner_org_id: str | None = None
 
     plan_start: datetime | None = None
     plan_end: datetime | None = None
@@ -1181,3 +1204,130 @@ class WorkbenchOut(BaseModel):
     returned: list[WorkItem] = Field(default_factory=list)
     inflight: list[WorkItem] = Field(default_factory=list)
     by_stage: list[StageWorkBucket] = Field(default_factory=list)
+
+
+# ============================================================
+# 系统管理控制台
+# ============================================================
+
+
+class AdminOrgOut(BaseModel):
+    id: str
+    name: str
+    short_name: str | None = None
+    org_type: str
+    unit_code: str | None = None
+    unit_label: str | None = None
+    is_unit_admin: bool = False
+
+
+class AdminProjectOption(BaseModel):
+    id: str
+    project_no: str
+    name: str
+    current_stage_code: str
+    current_stage_label: str | None = None
+
+
+class ProjectMemberCreateIn(BaseModel):
+    user_id: str
+    unit_code: UnitCode | None = None
+    stage_scope: list[StageCode] = Field(default_factory=list)
+    responsibility: Responsibility | None = None
+
+
+class ProjectMemberCandidateOut(BaseModel):
+    user_id: str
+    username: str
+    name: str
+    employee_no: str | None = None
+    org_id: str | None = None
+    org_name: str | None = None
+    org_type: str | None = None
+    unit_code: str
+    unit_label: str
+    is_unit_admin: bool = False
+
+
+class AdminOverviewOut(BaseModel):
+    user_count: int
+    active_user_count: int
+    admin_count: int
+    project_count: int
+    org_count: int
+    membership_count: int
+    #: SYSTEM = 总管理员；UNIT = 部门管理员（数据只统计本部门范围）
+    scope: str = "SYSTEM"
+    managed_org_names: list[str] = Field(default_factory=list)
+
+
+class AdminPermissionAssignment(BaseModel):
+    project_id: str
+    unit_code: UnitCode | None = None
+    stage_scope: list[StageCode] = Field(default_factory=list)
+    responsibility: Responsibility | None = None
+
+
+class AdminUserCreateIn(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=6, max_length=128)
+    name: str = Field(min_length=1, max_length=64)
+    employee_no: str | None = Field(default=None, max_length=64)
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=64)
+    org_id: str
+    is_superuser: bool = False
+    is_unit_admin: bool = False
+    assignments: list[AdminPermissionAssignment] = Field(default_factory=list)
+
+
+class AdminUserUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    employee_no: str | None = Field(default=None, max_length=64)
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=64)
+    is_active: bool | None = None
+    is_unit_admin: bool | None = None
+
+
+class AdminPasswordResetIn(BaseModel):
+    password: str = Field(min_length=6, max_length=128)
+
+
+class AdminMembershipOut(BaseModel):
+    id: str
+    project_id: str
+    project_no: str | None = None
+    project_name: str | None = None
+    unit_code: str
+    unit_label: str | None = None
+    stage_scope: list[str] = Field(default_factory=list)
+    responsibility_override: list[dict] = Field(default_factory=list)
+
+
+class AdminUserOut(BaseModel):
+    id: str
+    username: str
+    name: str
+    employee_no: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    title: str | None = None
+    is_active: bool
+    is_superuser: bool
+    orgs: list[AdminOrgOut] = Field(default_factory=list)
+    memberships: list[AdminMembershipOut] = Field(default_factory=list)
+    created_at: datetime | None = None
+
+
+class AdminOptionsOut(BaseModel):
+    orgs: list[AdminOrgOut] = Field(default_factory=list)
+    projects: list[AdminProjectOption] = Field(default_factory=list)
+    stages: list[dict] = Field(default_factory=list)
+    units: list[dict] = Field(default_factory=list)
+    responsibilities: list[dict] = Field(default_factory=list)
+    managed_org_ids: list[str] = Field(default_factory=list)
+    #: 参与单位 -> 该单位在《管理流程》中有责任的阶段，供前端过滤
+    unit_stages: dict[str, list[str]] = Field(default_factory=dict)

@@ -16,12 +16,27 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const navItems = [
+type NavItem = {
+  name: string
+  label: string
+  to?: { name: string }
+}
+
+const navItems = computed<NavItem[]>(() => [
+  ...(auth.canManageStaff
+    ? [
+        {
+          name: 'admin',
+          label: auth.user?.is_superuser ? '管理控制台' : '部门权限',
+          to: { name: 'admin' },
+        },
+      ]
+    : []),
   { name: 'projects', label: '工作台', to: { name: 'projects' } },
   { name: 'my-work', label: '我的工作', to: { name: 'my-work' } },
   { name: 'knowledge', label: '知识库', to: { name: 'knowledge' } },
   { name: 'ai', label: 'AI 助手', to: { name: 'ai' } },
-]
+])
 
 const activeNav = computed(() => {
   const n = route.name as string
@@ -45,12 +60,15 @@ const activeNav = computed(() => {
 const primaryOrg = computed(() => auth.user?.orgs?.[0]?.name ?? '')
 // 顶栏显示"我以哪些单位参与" —— 一个人可能在不同项目里代表不同单位
 const roleSummary = computed(() => {
+  if (auth.user?.is_superuser) return '总管理员'
+  const managed = auth.managedOrgs.map((o) => o.name).join(' / ')
+  if (managed) return `${managed} · 部门管理员`
   const ms = auth.user?.memberships ?? []
   const units = Array.from(new Set(ms.map((m) => m.unit_label)))
   return units.length ? units.join(' / ') : '—'
 })
 
-function onNav(item: (typeof navItems)[number]) {
+function onNav(item: NavItem) {
   if (!item.to) {
     ElMessage.info(`「${item.label}」将在后续迭代中实现`)
     return
@@ -95,7 +113,10 @@ function logout() {
               <el-dropdown-item disabled>
                 参与项目 {{ auth.user?.memberships.length ?? 0 }} 个
               </el-dropdown-item>
-              <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
+              <el-dropdown-item divided @click="router.push({ name: 'profile' })">
+                个人设置
+              </el-dropdown-item>
+              <el-dropdown-item @click="logout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -145,6 +166,7 @@ function logout() {
   padding-bottom: 2px;
   border-bottom: 2px solid transparent;
   user-select: none;
+  white-space: nowrap;
 }
 .topnav span:hover {
   color: #fff;
@@ -195,5 +217,28 @@ function logout() {
   flex: 1 1 auto;
   padding: 20px 26px 30px;
   overflow: auto;
+}
+
+@media (max-width: 1100px) {
+  .org {
+    display: none;
+  }
+  .topbar {
+    gap: 18px;
+    padding: 0 16px;
+  }
+  .topnav {
+    gap: 18px;
+  }
+}
+
+@media (max-width: 820px) {
+  .brand {
+    font-size: 15px;
+  }
+  .topnav {
+    gap: 14px;
+    font-size: 13px;
+  }
 }
 </style>

@@ -101,7 +101,7 @@ export const ProjectStatus = {
 export type ProjectStatus = (typeof ProjectStatus)[keyof typeof ProjectStatus]
 
 export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
-  PREPARING: '筹备',
+  PREPARING: '待审核',
   IN_PROGRESS: '进行中',
   SUSPENDED: '暂停',
   COMPLETED: '已完成',
@@ -234,6 +234,7 @@ export interface OrgBrief {
   short_name?: string | null
   org_type: string
   is_internal: boolean
+  is_unit_admin: boolean
 }
 
 export interface Membership {
@@ -249,6 +250,16 @@ export interface Membership {
   responsibility?: Responsibility | null
   responsibility_label?: string | null
   actions: PermissionAction[]
+}
+
+export interface ProfileUpdateIn {
+  phone?: string | null
+  email?: string | null
+}
+
+export interface ChangePasswordIn {
+  old_password: string
+  new_password: string
 }
 
 export interface CurrentUser {
@@ -325,6 +336,7 @@ export interface ProjectInfo {
   current_stage_code: StageCode
   current_stage_label?: string | null
   status: ProjectStatus
+  owner_org_id?: string | null
 
   plan_start?: string | null
   plan_end?: string | null
@@ -1304,4 +1316,126 @@ export interface AIConversation {
   message_count: number
   created_at?: string | null
   updated_at?: string | null
+}
+
+export interface ProjectMemberCandidate {
+  user_id: string
+  username: string
+  name: string
+  employee_no?: string | null
+  org_id?: string | null
+  org_name?: string | null
+  org_type?: string | null
+  unit_code: UnitCode
+  unit_label: string
+  is_unit_admin: boolean
+}
+
+export interface ProjectMemberCreateIn {
+  user_id: string
+  unit_code?: UnitCode | null
+  stage_scope?: StageCode[]
+  responsibility?: Responsibility | null
+}
+
+// ============================================================
+// 系统管理控制台
+// ============================================================
+
+export interface AdminOrg {
+  id: string
+  name: string
+  short_name?: string | null
+  org_type: string
+  unit_code?: string | null
+  unit_label?: string | null
+  is_unit_admin: boolean
+}
+
+export interface AdminProjectOption {
+  id: string
+  project_no: string
+  name: string
+  current_stage_code: StageCode
+  current_stage_label?: string | null
+}
+
+export interface AdminOverview {
+  user_count: number
+  active_user_count: number
+  admin_count: number
+  project_count: number
+  org_count: number
+  membership_count: number
+  /** SYSTEM = 总管理员；UNIT = 部门管理员（只统计本部门范围） */
+  scope: 'SYSTEM' | 'UNIT'
+  managed_org_names: string[]
+}
+
+export interface AdminPermissionAssignment {
+  project_id: string
+  unit_code?: UnitCode | null
+  stage_scope?: StageCode[]
+  responsibility?: Responsibility | null
+}
+
+export interface AdminMembership {
+  id: string
+  project_id: string
+  project_no?: string | null
+  project_name?: string | null
+  unit_code: string
+  unit_label?: string | null
+  stage_scope: string[]
+  responsibility_override: { stage_code: string; responsibility: string }[]
+}
+
+export interface AdminUser {
+  id: string
+  username: string
+  name: string
+  employee_no?: string | null
+  phone?: string | null
+  email?: string | null
+  title?: string | null
+  is_active: boolean
+  is_superuser: boolean
+  orgs: AdminOrg[]
+  memberships: AdminMembership[]
+  created_at?: string | null
+}
+
+export interface AdminUserCreateIn {
+  username: string
+  password: string
+  name: string
+  employee_no?: string | null
+  phone?: string | null
+  email?: string | null
+  title?: string | null
+  org_id: string
+  is_superuser?: boolean
+  is_unit_admin?: boolean
+  assignments?: AdminPermissionAssignment[]
+}
+
+export interface AdminUserUpdateIn {
+  name?: string
+  employee_no?: string | null
+  phone?: string | null
+  email?: string | null
+  title?: string | null
+  is_active?: boolean
+  is_unit_admin?: boolean
+}
+
+export interface AdminOptions {
+  orgs: AdminOrg[]
+  projects: AdminProjectOption[]
+  stages: { code: StageCode; label: string }[]
+  units: { code: UnitCode; label: string }[]
+  responsibilities: { code: Responsibility; label: string }[]
+  managed_org_ids: string[]
+  /** 参与单位 -> 该单位有责任的阶段 */
+  unit_stages: Record<string, StageCode[]>
 }

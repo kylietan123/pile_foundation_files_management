@@ -91,6 +91,7 @@ class Membership:
     #: 项目级阶段覆盖。为空 → 用《管理流程》矩阵推出来的阶段（默认、推荐）。
     #: 非空 → 用项目自己的配置（个别项目责任划分与标准矩阵不同时才用）。
     stage_scope_override: set[str] | None = None
+    responsibility_overrides: dict[str, Responsibility] | None = None
     valid_from: date | None = None
     valid_to: date | None = None
 
@@ -107,6 +108,10 @@ class Membership:
         return set(stages_of_unit(self.unit_code).keys())
 
     def responsibility_in(self, stage_code: str | None) -> Responsibility | None:
+        if stage_code and self.responsibility_overrides:
+            override = self.responsibility_overrides.get(stage_code)
+            if override is not None:
+                return override
         return responsibility_of(stage_code, self.unit_code)
 
     def covers_stage(self, stage_code: str | None) -> bool:
@@ -316,12 +321,29 @@ def build_principal(db: Session, user: AppUser) -> Principal:
             org_id=r.org_id,
             data_scope=r.data_scope or DataScope.PROJECT.value,
             stage_scope_override=_parse_stage_override(r.stage_scope),
+            responsibility_overrides=_parse_responsibility_overrides(r.responsibility_override),
             valid_from=r.valid_from,
             valid_to=r.valid_to,
         )
         for r in rows
     ]
     return Principal(user=user, memberships=memberships, is_superuser=user.is_superuser)
+
+
+def _parse_responsibility_overrides(raw: str | None) -> dict[str, Responsibility] | None:
+    """解析项目级责任覆盖，如 "CONSTRUCTION=PRIMARY"。"""
+    if not raw:
+        return None
+    out: dict[str, Responsibility] = {}
+    for item in raw.split(","):
+        if "=" not in item:
+            continue
+        stage_code, responsibility_code = (part.strip() for part in item.split("=", 1))
+        try:
+            out[StageCode(stage_code).value] = Responsibility(responsibility_code)
+        except ValueError:
+            continue
+    return out or None
 
 
 def _parse_stage_override(raw: str | None) -> set[str] | None:
