@@ -1,0 +1,170 @@
+/* ============================================================
+   全局样式与设计令牌。
+   配色与交互稿保持一致，避免"稿子一套、实现一套"。
+   ============================================================ */
+
+:root {
+  --navy: #12305c;
+  --navy-2: #1c4a86;
+  --blue: #1e6fd9;
+  --blue-soft: #e8f1fd;
+  --teal: #0f9b8e;
+  --teal-soft: #e4f5f3;
+  --amber: #c8811a;
+  --amber-soft: #fdf1de;
+  --red: #cf3b3b;
+  --red-soft: #fdeaea;
+  --grey: #6b7a8d;
+  --grey-soft: #eef1f5;
+  --line: #dde4ec;
+  --ink: #1b2430;
+  --ink-2: #4a5866;
+  --bg: #eef2f7;
+
+  /* Element Plus 主色对齐设计稿 */
+  --el-color-primary: #1e6fd9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Microsoft YaHei', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- 通用卡片 ---------------- */
+.app-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.sec-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 13px;
+}
+
+.sec-title::before {
+  content: '';
+  width: 3px;
+  height: 15px;
+  background: var(--blue);
+  border-radius: 2px;
+}
+
+.sec-title .more {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--blue);
+  cursor: pointer;
+}
+
+/* ---------------- 文字工具类 ---------------- */
+.t-grey {
+  color: var(--grey);
+}
+.t-blue {
+  color: var(--blue);
+}
+.t-teal {
+  color: var(--teal);
+}
+.t-amber {
+  color: var(--amber);
+}
+.t-red {
+  color: var(--red);
+}
+.t-mono {
+  font-family: Consolas, 'Courier New', monospace;
+}
+.t-sm {
+  font-size: 12.5px;
+}
+
+/* ---------------- 阶段进度条（首页卡片用）---------------- */
+.stage-rail-mini {
+  display: flex;
+  align-items: flex-start;
+  margin: 14px 0 12px;
+}
+
+.stage-rail-mini .node {
+  flex: 1;
+  text-align: center;
+  font-size: 10.5px;
+  color: #b3bdc9;
+  line-height: 1.3;
+}
+
+.stage-rail-mini .node .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #dfe5ec;
+  margin: 0 auto 5px;
+}
+
+.stage-rail-mini .node.done {
+  color: var(--teal);
+}
+.stage-rail-mini .node.done .dot {
+  background: var(--teal);
+}
+
+.stage-rail-mini .node.current {
+  color: var(--blue);
+  font-weight: 700;
+}
+.stage-rail-mini .node.current .dot {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(30, 111, 217, 0.2);
+}
+
+.stage-rail-mini .link {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 2px;
+  background: #dfe5ec;
+  margin-top: 4px;
+}
+.stage-rail-mini .link.done {
+  background: var(--teal);
+}
+
+/* ---------------- 滚动条 ---------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c9d3de;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #aab8c7;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
