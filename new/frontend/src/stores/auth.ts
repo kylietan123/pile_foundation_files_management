@@ -18,6 +18,7 @@ import type {
   Membership,
   PermissionAction,
   StageCode,
+  TokenPair,
   UnitCode,
 } from '@/api/types'
 
@@ -38,6 +39,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** 是否能进入权限管理页面：总管理员或部门管理员 */
   const canManageStaff = computed(() => !!user.value?.is_superuser || isUnitAdmin.value)
+
+  /** 首次登录或管理员重置密码后，必须先修改密码 */
+  const mustChangePassword = computed(() => !!user.value?.must_change_password)
 
   function membershipOf(projectId: string): Membership | undefined {
     return user.value?.memberships.find((m) => m.project_id === projectId)
@@ -79,6 +83,10 @@ export const useAuthStore = defineStore('auth', () => {
     return true
   }
 
+  function applyTokens(pair: TokenPair) {
+    tokenStore.save(pair)
+  }
+
   async function login(username: string, password: string) {
     const pair = await authApi.login({ username, password })
     tokenStore.save(pair)
@@ -108,12 +116,14 @@ export const useAuthStore = defineStore('auth', () => {
     managedOrgs,
     isUnitAdmin,
     canManageStaff,
+    mustChangePassword,
     membershipOf,
     unitIn,
     visibleStages,
     primaryStages,
     isPrimaryOf,
     can,
+    applyTokens,
     login,
     fetchMe,
     logout,

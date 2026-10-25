@@ -48,6 +48,10 @@ async function onSubmit() {
   try {
     await auth.login(form.username, form.password)
     ElMessage.success(`欢迎，${auth.user?.name}`)
+    if (auth.mustChangePassword) {
+      router.push('/change-initial-password')
+      return
+    }
     const redirect = route.query.redirect as string | undefined
     router.push(redirect || (auth.user?.is_superuser ? '/admin' : '/projects'))
   } catch (e) {

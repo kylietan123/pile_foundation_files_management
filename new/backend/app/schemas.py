@@ -81,6 +81,7 @@ class TokenPair(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    must_change_password: bool = False
 
 
 class RefreshRequest(BaseModel):
@@ -141,6 +142,12 @@ class ChangePasswordIn(BaseModel):
     new_password: str = Field(min_length=6, max_length=128)
 
 
+class PasswordChangeOut(TokenPair):
+    """修改密码后返回新 token，使当前设备继续登录、其他设备立即退出。"""
+
+    message: str = "密码修改成功"
+
+
 class CurrentUserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -152,6 +159,7 @@ class CurrentUserOut(BaseModel):
     email: str | None = None
     title: str | None = None
     is_superuser: bool
+    must_change_password: bool = False
     orgs: list[OrgBrief] = Field(default_factory=list)
     memberships: list[MembershipOut] = Field(default_factory=list)
 
@@ -1276,10 +1284,34 @@ class AdminUserCreateIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     email: str | None = Field(default=None, max_length=128)
     title: str | None = Field(default=None, max_length=64)
+    hire_date: date | None = None
     org_id: str
     is_superuser: bool = False
     is_unit_admin: bool = False
     assignments: list[AdminPermissionAssignment] = Field(default_factory=list)
+
+
+class AdminBulkUserItem(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=6, max_length=128)
+    name: str = Field(min_length=1, max_length=64)
+    employee_no: str | None = Field(default=None, max_length=64)
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=64)
+
+
+class AdminBulkUserCreateIn(BaseModel):
+    org_id: str
+    hire_date: date | None = None
+    users: list[AdminBulkUserItem] = Field(min_length=1, max_length=100)
+    assignments: list[AdminPermissionAssignment] = Field(default_factory=list)
+
+
+class AdminBulkDisableIn(BaseModel):
+    user_ids: list[str] = Field(min_length=1, max_length=100)
+    leave_date: date | None = None
+    disable_reason: str | None = Field(default=None, max_length=255)
 
 
 class AdminUserUpdateIn(BaseModel):
@@ -1288,8 +1320,11 @@ class AdminUserUpdateIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     email: str | None = Field(default=None, max_length=128)
     title: str | None = Field(default=None, max_length=64)
+    hire_date: date | None = None
+    leave_date: date | None = None
     is_active: bool | None = None
     is_unit_admin: bool | None = None
+    disable_reason: str | None = Field(default=None, max_length=255)
 
 
 class AdminPasswordResetIn(BaseModel):
@@ -1317,6 +1352,13 @@ class AdminUserOut(BaseModel):
     title: str | None = None
     is_active: bool
     is_superuser: bool
+    must_change_password: bool = False
+    hire_date: date | None = None
+    leave_date: date | None = None
+    disabled_at: datetime | None = None
+    disabled_by_name: str | None = None
+    disable_reason: str | None = None
+    last_password_changed_at: datetime | None = None
     orgs: list[AdminOrgOut] = Field(default_factory=list)
     memberships: list[AdminMembershipOut] = Field(default_factory=list)
     created_at: datetime | None = None
@@ -1331,3 +1373,13 @@ class AdminOptionsOut(BaseModel):
     managed_org_ids: list[str] = Field(default_factory=list)
     #: 参与单位 -> 该单位在《管理流程》中有责任的阶段，供前端过滤
     unit_stages: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class AdminBulkUserCreateOut(BaseModel):
+    created_count: int
+    users: list[AdminUserOut] = Field(default_factory=list)
+
+
+class AdminBulkDisableOut(BaseModel):
+    disabled_count: int
+    users: list[AdminUserOut] = Field(default_factory=list)

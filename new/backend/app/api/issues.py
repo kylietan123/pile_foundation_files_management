@@ -209,10 +209,13 @@ def list_issues(
 @router.get("/projects/{project_id}/issues/summary", response_model=ApiResponse[IssueSummaryOut],
             summary="问题统计")
 def issues_summary(
-    project_id: str, db: DbSession, principal: CurrentPrincipal
+    project_id: str,
+    db: DbSession,
+    principal: CurrentPrincipal,
+    stage: str | None = None,
 ) -> ApiResponse[IssueSummaryOut]:
     require_project_view(project_id, principal)
-    return ApiResponse(data=IssueSummaryOut(**issvc.issue_summary(db, project_id)))
+    return ApiResponse(data=IssueSummaryOut(**issvc.issue_summary(db, project_id, stage_code=stage)))
 
 
 @router.post("/projects/{project_id}/issues", response_model=ApiResponse[IssueOut],

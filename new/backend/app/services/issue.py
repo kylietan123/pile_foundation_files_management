@@ -100,9 +100,9 @@ def get_issue(db: Session, issue_id: str) -> Issue:
     return iss
 
 
-def issue_summary(db: Session, project_id: str) -> dict:
+def issue_summary(db: Session, project_id: str, stage_code: str | None = None) -> dict:
     """问题统计。页面上"未闭环问题 N 项"的数据源。"""
-    rows = list_issues(db, project_id)
+    rows = list_issues(db, project_id, stage_code=stage_code)
     by_status: dict[str, int] = {}
     by_severity: dict[str, int] = {}
     by_source: dict[str, int] = {}

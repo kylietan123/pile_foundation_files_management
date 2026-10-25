@@ -7,6 +7,10 @@ import type {
   AIConversation,
   AIMessage,
   AIProviderStatus,
+  AdminBulkDisableIn,
+  AdminBulkDisableOut,
+  AdminBulkUserCreateIn,
+  AdminBulkUserCreateOut,
   AdminOptions,
   AdminOverview,
   AdminPermissionAssignment,
@@ -39,6 +43,7 @@ import type {
   ProjectCreateIn,
   ProjectInfo,
   ProjectUpdateIn,
+  PasswordChangeOut,
   ProfileUpdateIn,
   ProjectMemberCandidate,
   ProjectMemberCreateIn,
@@ -59,6 +64,10 @@ export const adminApi = {
   users: (keyword?: string) =>
     get<AdminUser[]>('/admin/users', keyword ? { keyword } : undefined),
   createUser: (body: AdminUserCreateIn) => post<AdminUser>('/admin/users', body),
+  bulkCreateUsers: (body: AdminBulkUserCreateIn) =>
+    post<AdminBulkUserCreateOut>('/admin/users/bulk', body),
+  bulkDeactivateUsers: (body: AdminBulkDisableIn) =>
+    post<AdminBulkDisableOut>('/admin/users/bulk-disable', body),
   updateUser: (id: string, body: AdminUserUpdateIn) => patch<AdminUser>(`/admin/users/${id}`, body),
   resetPassword: (id: string, password: string) =>
     post<{ user_id: string; message: string }>(`/admin/users/${id}/reset-password`, { password }),
@@ -78,7 +87,7 @@ export const authApi = {
   stageOptions: () => get<StageOption[]>('/auth/stage-options'),
   updateMe: (body: ProfileUpdateIn) => patch<CurrentUser>('/auth/me', body),
   changePassword: (body: ChangePasswordIn) =>
-    post<{ message: string }>('/auth/change-password', body),
+    post<PasswordChangeOut>('/auth/change-password', body),
 }
 
 // ---------------- 项目 ----------------
@@ -102,6 +111,24 @@ export const projectApi = {
 export const catalogApi = {
   documents: (stage?: string) =>
     get<CatalogDocument[]>('/catalog/documents', stage ? { stage } : undefined),
+
+  /** 按标准清单项直接上传：首次自动创建文档，后续追加版本。 */
+  async uploadDocument(
+    projectId: string,
+    docCode: string,
+    file: File,
+    changeSummary?: string,
+  ): Promise<DocumentVersionInfo> {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (changeSummary?.trim()) fd.append('change_summary', changeSummary.trim())
+    const resp = await http.post(
+      `/projects/${projectId}/catalog-documents/${encodeURIComponent(docCode)}/versions`,
+      fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    )
+    return resp.data.data as DocumentVersionInfo
+  },
 }
 
 // ---------------- 字典 ----------------
@@ -282,8 +309,11 @@ export const issueApi = {
     params?: { stage?: string; status?: string; source?: string; severity?: string; only_unclosed?: boolean },
   ) => get<IssueInfo[]>(`/projects/${projectId}/issues`, params as Record<string, unknown>),
 
-  summary: (projectId: string) =>
-    get<IssueSummary>(`/projects/${projectId}/issues/summary`),
+  summary: (projectId: string, stage?: string) =>
+    get<IssueSummary>(
+      `/projects/${projectId}/issues/summary`,
+      stage ? { stage } : undefined,
+    ),
 
   detail: (projectId: string, issueId: string) =>
     get<IssueInfo>(`/projects/${projectId}/issues/${issueId}`),

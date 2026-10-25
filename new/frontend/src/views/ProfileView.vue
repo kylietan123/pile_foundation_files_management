@@ -66,12 +66,14 @@ async function changePassword() {
   }
   savingPassword.value = true
   try {
-    await authApi.changePassword({
+    const result = await authApi.changePassword({
       old_password: passwordForm.old_password,
       new_password: passwordForm.new_password,
     })
+    auth.applyTokens(result)
+    await auth.fetchMe()
     Object.assign(passwordForm, { old_password: '', new_password: '', confirm_password: '' })
-    ElMessage.success('登录密码已修改')
+    ElMessage.success(result.message || '登录密码已修改')
   } catch (e) {
     ElMessage.error(explainApiError(e))
   } finally {
@@ -124,7 +126,7 @@ async function changePassword() {
 
       <section class="app-card setting-card password-card">
         <div class="card-title">修改登录密码</div>
-        <p class="hint">修改后当前会话仍保持登录，下次登录请使用新密码。</p>
+        <p class="hint">修改后其他设备会退出登录，当前设备会继续使用新会话。</p>
         <el-form label-position="top" :model="passwordForm">
           <el-form-item label="原密码">
             <el-input v-model="passwordForm.old_password" type="password" show-password />

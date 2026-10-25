@@ -246,6 +246,7 @@ def main() -> int:
                     password_hash=hash_password(PASSWORD),
                     is_active=True,
                     is_superuser=False,
+                    must_change_password=False,
                 )
             )
             db.commit()

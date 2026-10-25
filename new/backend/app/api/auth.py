@@ -4,10 +4,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 
-from app.api.deps import ERR_NO_ROLE, CurrentUser, DbSession, get_principal
+from app.api.deps import ERR_NO_ROLE, ERR_TOKEN_REVOKED, CurrentUser, DbSession, get_principal
 from app.core.permissions import Principal, resolve_org_ids
 from app.core.security import (
     create_access_token,
@@ -34,23 +34,23 @@ from app.schemas import (
     ChangePasswordIn,
     LoginRequest,
     MembershipOut,
+    PasswordChangeOut,
     ProfileUpdateIn,
     OrgBrief,
     RefreshRequest,
     TokenPair,
 )
 from app.config import settings
+from app.services.audit import write_audit
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
 @router.post("/login", response_model=ApiResponse[TokenPair], summary="登录")
-def login(body: LoginRequest, db: DbSession) -> ApiResponse[TokenPair]:
+def login(body: LoginRequest, db: DbSession, request: Request) -> ApiResponse[TokenPair]:
     """账号密码登录，返回 access + refresh token。
 
-    当前为自建账号（auth_source=LOCAL）。
-    后续对接院内 LDAP/AD 时，只需在 verify 环节增加分支，
-    接口契约不变，前端无需改动。
+    登录成功与失败都会写审计日志，失败日志不记录密码。
     """
     user = db.execute(
         select(AppUser).where(AppUser.username == body.username)
@@ -58,24 +58,59 @@ def login(body: LoginRequest, db: DbSession) -> ApiResponse[TokenPair]:
 
     # 统一错误提示：不区分"用户不存在"和"密码错误"，避免账号枚举
     if user is None or not verify_password(body.password, user.password_hash):
+        write_audit(
+            db,
+            action="LOGIN",
+            target_type="app_user",
+            actor_name=body.username,
+            target_id=user.id if user else None,
+            target_name=body.username,
+            detail="登录失败：用户名或密码错误",
+            request=request,
+            success=False,
+            commit=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": 2001, "message": "用户名或密码错误"},
         )
     if not user.is_active:
+        write_audit(
+            db,
+            action="LOGIN",
+            target_type="app_user",
+            actor=user,
+            target_id=user.id,
+            target_name=user.username,
+            detail="登录失败：账号已停用",
+            request=request,
+            success=False,
+            commit=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": 2003, "message": "账号已被禁用"},
         )
 
     user.last_login_at = datetime.now(timezone.utc)
+    write_audit(
+        db,
+        action="LOGIN",
+        target_type="app_user",
+        actor=user,
+        target_id=user.id,
+        target_name=user.username,
+        detail="登录成功（需先修改初始密码）" if user.must_change_password else "登录成功",
+        request=request,
+    )
     db.commit()
 
     return ApiResponse(
         data=TokenPair(
-            access_token=create_access_token(user.id),
-            refresh_token=create_refresh_token(user.id),
+            access_token=create_access_token(user.id, user.token_version),
+            refresh_token=create_refresh_token(user.id, user.token_version),
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            must_change_password=user.must_change_password,
         )
     )
 
@@ -102,12 +137,18 @@ def refresh(body: RefreshRequest, db: DbSession) -> ApiResponse[TokenPair]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": 2001, "message": "用户不存在或已禁用"},
         )
+    if int(payload.get("ver", 0)) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": ERR_TOKEN_REVOKED, "message": "登录状态已失效，请重新登录"},
+        )
 
     return ApiResponse(
         data=TokenPair(
-            access_token=create_access_token(user.id),
-            refresh_token=create_refresh_token(user.id),
+            access_token=create_access_token(user.id, user.token_version),
+            refresh_token=create_refresh_token(user.id, user.token_version),
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            must_change_password=user.must_change_password,
         )
     )
 
@@ -118,22 +159,45 @@ def update_me(
     db: DbSession,
     user: CurrentUser,
     principal: Annotated[Principal, Depends(get_principal)],
+    request: Request,
 ) -> ApiResponse[CurrentUserOut]:
     """用户修改自己的姓名、电话、邮箱和职称。
 
     姓名、职称、用户名、工号、所属单位和项目权限仍由系统管理员维护。
     """
+    before = {"phone": user.phone, "email": user.email}
     for key in ("phone", "email"):
         value = getattr(body, key)
         if value is not None:
             setattr(user, key, value.strip() if isinstance(value, str) else value)
+    write_audit(
+        db,
+        action="UPDATE",
+        target_type="app_user",
+        actor=user,
+        target_id=user.id,
+        target_name=user.name,
+        before=before,
+        after={"phone": user.phone, "email": user.email},
+        detail="员工修改个人联系方式",
+        request=request,
+    )
     db.commit()
     db.refresh(user)
     return me(db=db, user=user, principal=principal)
 
 
-@router.post("/change-password", response_model=ApiResponse[dict], summary="修改登录密码")
-def change_password(body: ChangePasswordIn, db: DbSession, user: CurrentUser) -> ApiResponse[dict]:
+@router.post(
+    "/change-password",
+    response_model=ApiResponse[PasswordChangeOut],
+    summary="修改登录密码",
+)
+def change_password(
+    body: ChangePasswordIn,
+    db: DbSession,
+    user: CurrentUser,
+    request: Request,
+) -> ApiResponse[PasswordChangeOut]:
     if not verify_password(body.old_password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -144,9 +208,42 @@ def change_password(body: ChangePasswordIn, db: DbSession, user: CurrentUser) ->
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": 2005, "message": "新密码不能与原密码相同"},
         )
+    before_version = int(user.token_version or 0)
+    before_must_change = bool(user.must_change_password)
     user.password_hash = hash_password(body.new_password)
+    # 递增版本：其他设备上的旧 access/refresh token 立即失效。
+    user.token_version = before_version + 1
+    user.must_change_password = False
+    user.last_password_changed_at = datetime.now(timezone.utc)
+    write_audit(
+        db,
+        action="UPDATE",
+        target_type="app_user",
+        actor=user,
+        target_id=user.id,
+        target_name=user.name,
+        before={
+            "token_version": before_version,
+            "must_change_password": before_must_change,
+        },
+        after={
+            "token_version": user.token_version,
+            "must_change_password": False,
+            "last_password_changed_at": user.last_password_changed_at.isoformat(),
+        },
+        detail="员工修改自己的登录密码，其他会话已失效",
+        request=request,
+    )
     db.commit()
-    return ApiResponse(data={"message": "密码修改成功"})
+    return ApiResponse(
+        data=PasswordChangeOut(
+            message="密码修改成功，其他设备已退出登录",
+            access_token=create_access_token(user.id, user.token_version),
+            refresh_token=create_refresh_token(user.id, user.token_version),
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            must_change_password=False,
+        )
+    )
 
 
 @router.get("/me", response_model=ApiResponse[CurrentUserOut], summary="当前用户与权限范围")
@@ -219,6 +316,7 @@ def me(
             email=user.email,
             title=user.title,
             is_superuser=user.is_superuser,
+            must_change_password=user.must_change_password,
             orgs=orgs,
             memberships=memberships,
         )

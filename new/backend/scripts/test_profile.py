@@ -65,6 +65,11 @@ def main() -> int:
         json={"old_password": PASSWORD, "new_password": NEW_PASSWORD},
     )
     check("原密码正确时修改成功", r.status_code == 200, r.text[:200])
+    changed = r.json().get("data") or {}
+    check("修改密码后返回新 access token", bool(changed.get("access_token")), str(changed)[:200])
+    new_h = {"Authorization": f"Bearer {changed.get('access_token')}"}
+    check("修改密码后旧 access token 立即失效", client.get("/api/v1/auth/me", headers=h).status_code == 401)
+    check("修改密码后新 access token 可继续使用", client.get("/api/v1/auth/me", headers=new_h).status_code == 200)
 
     r = client.post("/api/v1/auth/login", json={"username": "ouyuxin", "password": PASSWORD})
     check("旧密码不能继续登录", r.status_code == 401, str(r.status_code))

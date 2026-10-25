@@ -24,24 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core.upload_formats import ALLOWED_EXT, BLOCKED_EXT
 from app.models.document import FileObject
-
-# 允许上传的扩展名（按设计院实际交付物）
-ALLOWED_EXT = {
-    # 图纸与模型
-    ".dwg", ".dxf", ".rvt", ".ifc", ".skp",
-    # 文档与表格
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md",
-    # 计算与数据
-    ".txt", ".csv", ".json", ".xml", ".mdb",
-    # 图片
-    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp",
-    # 压缩包（设计院交经常打包）
-    ".zip", ".rar", ".7z",
-}
-
-# 危险/无意义的扩展名，显式拒绝（不依赖上面的白名单兜底）
-BLOCKED_EXT = {".exe", ".bat", ".cmd", ".ps1", ".sh", ".dll", ".scr", ".js", ".vbs"}
 
 
 class StorageError(Exception):

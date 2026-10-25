@@ -433,13 +433,22 @@ def seed_users(db, org_map: dict[str, Organization]) -> dict[str, AppUser]:
                 title=title,
                 is_superuser=is_super,
                 is_active=True,
+                must_change_password=False,
                 email=f"{username}@tjad.cn",
             )
             db.add(u)
             db.flush()
         else:
-            # 重置密码，保证演示账号始终可用
+            # 重置密码与账号状态，保证演示账号始终可用；同时让旧 token 失效。
             u.password_hash = pwd_hash
+            u.email = f"{username}@tjad.cn"
+            u.is_active = True
+            u.must_change_password = False
+            u.token_version = 0
+            u.disabled_at = None
+            u.disabled_by = None
+            u.disable_reason = None
+            u.leave_date = None
         user_map[username] = u
 
         org = org_map[org_key]
@@ -459,6 +468,7 @@ def seed_users(db, org_map: dict[str, Organization]) -> dict[str, AppUser]:
             db.flush()
         else:
             link.is_unit_admin = username in UNIT_ADMIN_USERNAMES
+            link.end_date = None
     return user_map
 
 

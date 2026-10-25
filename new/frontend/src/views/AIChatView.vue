@@ -41,7 +41,9 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 /** 检索范围：限定阶段 */
-const stageFilter = ref<string | null>(null)
+const stageFilter = ref<string | null>(
+  typeof route.query.stage === 'string' ? route.query.stage : null,
+)
 /** 是否把跨项目知识库纳入检索 */
 const useKnowledgeBase = ref(true)
 

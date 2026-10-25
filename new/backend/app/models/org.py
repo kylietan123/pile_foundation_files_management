@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, IdMixin, TimestampMixin
@@ -66,6 +66,21 @@ class AppUser(Base, IdMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="令牌版本；重置密码或停用账号后递增，使旧 token 立即失效",
+    )
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="0",
+        nullable=False,
+        comment="首次登录或管理员重置密码后必须修改密码",
+    )
+    last_password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column()
     # 预留 LDAP/AD 对接：为空表示本地账号
     external_id: Mapped[str | None] = mapped_column(String(128), index=True)
@@ -75,11 +90,22 @@ class AppUser(Base, IdMixin, TimestampMixin):
 
     # ---- 业务域 ----
     name: Mapped[str] = mapped_column(String(64), nullable=False)
-    employee_no: Mapped[str | None] = mapped_column(String(64), index=True)
+    employee_no: Mapped[str | None] = mapped_column(String(64), unique=True, comment="工号，全局唯一")
     phone: Mapped[str | None] = mapped_column(String(32))
-    email: Mapped[str | None] = mapped_column(String(128))
+    email: Mapped[str | None] = mapped_column(String(128), unique=True, comment="邮箱，统一小写后唯一")
     title: Mapped[str | None] = mapped_column(String(64), comment="职称，如注册结构工程师")
     avatar: Mapped[str | None] = mapped_column(String(300))
+
+    # ---- 员工生命周期 ----
+    hire_date: Mapped[date | None] = mapped_column(Date, comment="入职日期")
+    leave_date: Mapped[date | None] = mapped_column(Date, comment="离职日期")
+    disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="账号停用时间"
+    )
+    disabled_by: Mapped[str | None] = mapped_column(
+        String(32), comment="执行停用的管理员 user id"
+    )
+    disable_reason: Mapped[str | None] = mapped_column(String(255), comment="停用原因，如离职/调岗")
 
     orgs: Mapped[list["UserOrg"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 

@@ -1,6 +1,6 @@
 """标准文档清单接口。
 
-来源：陈铠俐版 `kylie/src/data/catalog.json`（7 阶段 / 84 类文档）。
+来源：陈铠俐版 `kylie/src/data/catalog.json`，并按最新 Excel 清单更新（当前 7 阶段 / 88 项，含 2 项运维待补充）。
 在合并版中它不改写 oyx 的文件与版本模型，而是作为项目阶段页的“应上传清单”
 基线，供工作台和后续阶段业务页复用。
 """
@@ -14,7 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentPrincipal
-
+from app.core.upload_formats import allowed_extensions_for_formats
 from app.models.enums import STAGE_LABELS, StageCode
 from app.schemas import ApiResponse
 
@@ -44,6 +44,7 @@ def _load_catalog() -> list[dict]:
             row["stage_label"] = STAGE_LABELS[StageCode(stage_code)]
         else:
             row["stage_label"] = row.get("phase_name", "")
+        row["allowed_extensions"] = allowed_extensions_for_formats(row.get("file_formats"))
     return rows
 
 

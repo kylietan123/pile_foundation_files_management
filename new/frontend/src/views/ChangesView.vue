@@ -15,7 +15,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { changeApi } from '@/api'
 import { explainApiError } from '@/api/http'
-import type { AffectedPile, ChangeImpact, ChangeInfo } from '@/api/types'
+import type { AffectedPile, ChangeImpact, ChangeInfo, StageCode } from '@/api/types'
 import {
   CHANGE_CATEGORY_LABEL,
   CHANGE_STATE_LABEL,
@@ -23,6 +23,7 @@ import {
   ChangeCategory,
   IMPACT_TARGET_LABEL,
   NODE_LABEL,
+  STAGE_LABEL,
   TASK_ACTION_LABEL,
 } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
@@ -31,6 +32,11 @@ import { formatDate, formatDateTime } from '@/utils/format'
 const route = useRoute()
 const auth = useAuthStore()
 const projectId = computed(() => route.params.id as string)
+const stageFilter = computed<StageCode | null>(() => {
+  const stage = route.query.stage
+  return typeof stage === 'string' && stage ? (stage as StageCode) : null
+})
+const createStage = computed<StageCode>(() => stageFilter.value || 'DESIGN')
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -48,7 +54,10 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    changes.value = await changeApi.list(projectId.value)
+    const rows = await changeApi.list(projectId.value)
+    changes.value = stageFilter.value
+      ? rows.filter((item) => item.stage_code === stageFilter.value)
+      : rows
     if (selected.value) {
       const fresh = changes.value.find((c) => c.id === selected.value!.id)
       selected.value = fresh ?? null
@@ -113,7 +122,7 @@ async function doCreate() {
   }
   try {
     const c = await changeApi.create(projectId.value, {
-      stage_code: 'DESIGN',
+      stage_code: createStage.value,
       title: createForm.title,
       category: createForm.category,
       reason: createForm.reason,
@@ -328,6 +337,9 @@ function money(v?: number | null): string {
           <b class="t-red">不依赖人记得去查</b>。
           其中「已施工部位」是最高风险项：桩已打下，桩位再改就是返工或补桩。
         </p>
+        <el-tag v-if="stageFilter" size="small" effect="plain" style="margin-top: 10px">
+          当前按{{ STAGE_LABEL[stageFilter] }}阶段查看
+        </el-tag>
       </div>
       <div class="head-actions">
         <el-button v-if="canEdit" type="primary" @click="openCreate">发起设计变更</el-button>

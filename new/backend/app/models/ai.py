@@ -198,7 +198,7 @@ class AuditLog(Base, IdMixin, TimestampMixin):
 
     action: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True,
-        comment="LOGIN/CREATE/UPDATE/DELETE/SUBMIT/APPROVE/RETURN/PUBLISH/VOID/DOWNLOAD/EXPORT/GRANT/VIEW_SECRET"
+        comment="LOGIN/CREATE/UPDATE/DISABLE/ENABLE/RESET_PASSWORD/BULK_CREATE/BULK_DISABLE/GRANT/REVOKE/DELETE/SUBMIT/APPROVE/RETURN/PUBLISH/VOID/DOWNLOAD/EXPORT/VIEW_SECRET"
     )
     target_type: Mapped[str | None] = mapped_column(String(64), index=True)
     target_id: Mapped[str | None] = mapped_column(String(32), index=True)

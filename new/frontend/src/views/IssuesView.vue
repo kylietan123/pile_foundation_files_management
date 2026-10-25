@@ -18,7 +18,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { issueApi, knowledgeApi } from '@/api'
 import { explainApiError } from '@/api/http'
-import type { IssueActionInfo, IssueInfo, IssueSummary, KnowledgeItem } from '@/api/types'
+import type { IssueActionInfo, IssueInfo, IssueSummary, KnowledgeItem, StageCode } from '@/api/types'
 import {
   ISSUE_ACTION_LABEL,
   ISSUE_ACTION_ORDER,
@@ -29,6 +29,7 @@ import {
   SEVERITY_LABEL,
   SEVERITY_TAG,
   Severity,
+  STAGE_LABEL,
 } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatDateTime } from '@/utils/format'
@@ -36,6 +37,11 @@ import { formatDate, formatDateTime } from '@/utils/format'
 const route = useRoute()
 const auth = useAuthStore()
 const projectId = computed(() => route.params.id as string)
+const stageFilter = computed<StageCode | null>(() => {
+  const stage = route.query.stage
+  return typeof stage === 'string' && stage ? (stage as StageCode) : null
+})
+const createStage = computed<StageCode>(() => stageFilter.value || 'DESIGN')
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -59,8 +65,11 @@ async function load() {
   error.value = null
   try {
     const [s, list] = await Promise.all([
-      issueApi.summary(projectId.value),
-      issueApi.list(projectId.value, onlyUnclosed.value ? { only_unclosed: true } : undefined),
+      issueApi.summary(projectId.value, stageFilter.value || undefined),
+      issueApi.list(projectId.value, {
+        ...(stageFilter.value ? { stage: stageFilter.value } : {}),
+        ...(onlyUnclosed.value ? { only_unclosed: true } : {}),
+      }),
     ])
     summary.value = s
     issues.value = list
@@ -96,7 +105,7 @@ async function refreshSelected() {
   // 闭环状态变化会影响列表筛选，重新拉一次
   if (fresh.status === 'CLOSED' && onlyUnclosed.value) await load()
   else {
-    const s = await issueApi.summary(projectId.value)
+    const s = await issueApi.summary(projectId.value, stageFilter.value || undefined)
     summary.value = s
   }
 }
@@ -128,7 +137,7 @@ async function doCreate() {
   }
   try {
     const i = await issueApi.create(projectId.value, {
-      stage_code: 'DESIGN',
+      stage_code: createStage.value,
       title: createForm.title,
       description: createForm.description,
       source: createForm.source,
@@ -330,6 +339,9 @@ const nextActions = computed(() =>
           处理链路：问题描述 → 查询 → 分析识别 → 建议 → 执行 → 验证 → 闭环 → 知识沉淀。
           <b class="t-amber">链路不可跳步，闭环必须先有验证。</b>
         </p>
+        <el-tag v-if="stageFilter" size="small" effect="plain" style="margin-top: 10px">
+          当前按{{ STAGE_LABEL[stageFilter] }}阶段查看
+        </el-tag>
       </div>
       <div class="head-actions">
         <el-badge v-if="summary?.knowledge_count" :value="summary.knowledge_count" type="success">

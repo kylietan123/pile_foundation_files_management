@@ -12,6 +12,12 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, title: '登录' },
   },
   {
+    path: '/change-initial-password',
+    name: 'change-initial-password',
+    component: () => import('@/views/ForcePasswordChangeView.vue'),
+    meta: { title: '首次修改密码' },
+  },
+  {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
     children: [
@@ -19,6 +25,7 @@ const routes: RouteRecordRaw[] = [
         path: '',
         redirect: () => {
           const auth = useAuthStore()
+          if (auth.mustChangePassword) return { name: 'change-initial-password' }
           return auth.user?.is_superuser ? { name: 'admin' } : { name: 'projects' }
         },
       },
@@ -118,6 +125,7 @@ router.beforeEach(async (to) => {
 
   if (to.meta.public) {
     if (auth.isLoggedIn) {
+      if (auth.mustChangePassword) return { name: 'change-initial-password' }
       return auth.user?.is_superuser ? { name: 'admin' } : { name: 'projects' }
     }
     return true
@@ -135,6 +143,12 @@ router.beforeEach(async (to) => {
       auth.logout()
       return { name: 'login', query: { redirect: to.fullPath } }
     }
+  }
+  if (auth.mustChangePassword && to.name !== 'change-initial-password') {
+    return { name: 'change-initial-password' }
+  }
+  if (!auth.mustChangePassword && to.name === 'change-initial-password') {
+    return auth.user?.is_superuser ? { name: 'admin' } : { name: 'projects' }
   }
   if (to.meta.adminOnly && !auth.canManageStaff) {
     return { name: 'projects' }

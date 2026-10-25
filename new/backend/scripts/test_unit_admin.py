@@ -13,8 +13,11 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
+from app.core.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models.ai import AuditLog  # noqa: E402
 
 PASSWORD = "Tjad@2026"
 passed = 0
@@ -236,6 +239,28 @@ def main() -> int:
     check("停用即吊销全部项目权限", len(stopped.get("memberships") or []) == 0, str(stopped.get("memberships")))
     check("停用后账号仍保留在列表中", any(u.get("id") == created["id"] for u in (client.get("/api/v1/admin/users", headers=unit_h).json().get("data") or [])))
     check("停用后不能登录", login(client, employee_username, "NewUser@123").status_code == 403)
+    check("停用后旧 access token 立即失效", client.get("/api/v1/auth/me", headers=emp_h).status_code == 401)
+
+    r = client.post(
+        f"/api/v1/admin/users/{created['id']}/permissions",
+        headers=unit_h,
+        json={
+            "project_id": project["id"],
+            "unit_code": "DESIGNER",
+            "stage_scope": ["DESIGN"],
+        },
+    )
+    check("停用账号不能重新分配项目权限", r.status_code == 400, r.text[:300])
+    r = client.post(
+        f"/api/v1/admin/users/{created['id']}/permissions",
+        headers=admin_h,
+        json={
+            "project_id": project["id"],
+            "unit_code": "DESIGNER",
+            "stage_scope": ["DESIGN"],
+        },
+    )
+    check("总管理员也不能给停用账号分配权限", r.status_code == 400, r.text[:300])
 
     r = client.patch(
         f"/api/v1/admin/users/{created['id']}",
@@ -249,8 +274,73 @@ def main() -> int:
         len((r.json().get("data") or {}).get("memberships") or []) == 0,
         str((r.json().get("data") or {}).get("memberships")),
     )
+    check("重新启用后停用前的旧 token 仍失效", client.get("/api/v1/auth/me", headers=emp_h).status_code == 401)
 
-    print("\n[5] 不能管理其他管理员")
+    r = login(client, employee_username, "NewUser@123")
+    reactivated_h = {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
+    check("重新启用后可重新获取新会话", client.get("/api/v1/auth/me", headers=reactivated_h).status_code == 200)
+
+    r = client.post(
+        f"/api/v1/admin/users/{created['id']}/reset-password",
+        headers=admin_h,
+        json={"password": "Reset@123"},
+    )
+    check("总管理员可重置员工密码", r.status_code == 200, r.text[:300])
+    check("重置密码后旧 access token 立即失效", client.get("/api/v1/auth/me", headers=reactivated_h).status_code == 401)
+    check("重置后旧密码不能登录", login(client, employee_username, "NewUser@123").status_code == 401)
+    r = login(client, employee_username, "Reset@123")
+    check("重置后新密码可以登录", r.status_code == 200, r.text[:200])
+    check("重置密码后再次要求首次改密", (r.json().get("data") or {}).get("must_change_password") is True)
+    reset_h = {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
+    check("重置密码后未改密不能进入业务接口", client.get("/api/v1/projects", headers=reset_h).status_code == 403)
+
+    print("\n[5] 审计日志")
+    db = SessionLocal()
+    try:
+        account_actions = set(
+            db.execute(
+                select(AuditLog.action).where(AuditLog.target_id == created["id"])
+            ).scalars().all()
+        )
+        membership_actions = set(
+            db.execute(
+                select(AuditLog.action).where(
+                    AuditLog.target_type == "project_member",
+                    AuditLog.target_name.like("%部门员工改名%"),
+                )
+            ).scalars().all()
+        )
+        failed_logins = db.execute(
+            select(AuditLog).where(
+                AuditLog.action == "LOGIN",
+                AuditLog.success.is_(False),
+                AuditLog.target_name == employee_username,
+            )
+        ).scalars().all()
+        success_logins = db.execute(
+            select(AuditLog).where(
+                AuditLog.action == "LOGIN",
+                AuditLog.success.is_(True),
+                AuditLog.target_id == created["id"],
+            )
+        ).scalars().all()
+    finally:
+        db.close()
+
+    check(
+        "账号创建/修改/停用/启用/重置密码都有审计",
+        {"CREATE", "UPDATE", "DISABLE", "ENABLE", "RESET_PASSWORD"}.issubset(account_actions),
+        str(account_actions),
+    )
+    check(
+        "项目授权/取消权限都有审计",
+        {"GRANT", "REVOKE"}.issubset(membership_actions),
+        str(membership_actions),
+    )
+    check("登录失败有审计", len(failed_logins) > 0, str(failed_logins))
+    check("登录成功有审计", len(success_logins) > 0, str(success_logins))
+
+    print("\n[6] 不能管理其他管理员")
     r = client.post(
         "/api/v1/admin/users",
         headers=admin_h,

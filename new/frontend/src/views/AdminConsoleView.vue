@@ -6,13 +6,14 @@
  * 并把员工加入本部门已参与的项目、分配本部门有责任的阶段。
  * 它不是工作台；管理员需要查看项目时，通过顶部导航的工作台切换。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { adminApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { explainApiError } from '@/api/http'
 import type {
+  AdminBulkUserItem,
   AdminMembership,
   AdminOptions,
   AdminOverview,
@@ -34,11 +35,22 @@ const overview = ref<AdminOverview | null>(null)
 const keyword = ref('')
 
 const createVisible = ref(false)
+const bulkCreateVisible = ref(false)
 const permissionVisible = ref(false)
 const resetVisible = ref(false)
 const editVisible = ref(false)
 const membershipVisible = ref(false)
+const deactivateVisible = ref(false)
+const bulkDeactivateVisible = ref(false)
 const targetUser = ref<AdminUser | null>(null)
+const deactivateTarget = ref<AdminUser | null>(null)
+const selectedUsers = ref<AdminUser[]>([])
+const userTableRef = ref<{ clearSelection: () => void } | null>(null)
+
+function todayString() {
+  const d = new Date()
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+}
 
 const isSuperAdmin = computed(() => !!auth.user?.is_superuser)
 const isUnitScope = computed(() => !isSuperAdmin.value || overview.value?.scope === 'UNIT')
@@ -51,6 +63,7 @@ const createForm = reactive<AdminUserCreateIn & { assignment: AdminPermissionAss
   phone: '',
   email: '',
   title: '',
+  hire_date: '',
   org_id: '',
   is_superuser: false,
   is_unit_admin: false,
@@ -76,8 +89,44 @@ const editForm = reactive({
   phone: '',
   email: '',
   title: '',
+  hire_date: '',
+  leave_date: '',
+  disable_reason: '',
   is_unit_admin: false,
 })
+
+const bulkCreateForm = reactive({
+  org_id: '',
+  hire_date: '',
+  assignment: {
+    project_id: '',
+    unit_code: null as UnitCode | null,
+    stage_scope: [] as StageCode[],
+    responsibility: null as Responsibility | null,
+  },
+})
+const bulkRows = ref<AdminBulkUserItem[]>([])
+
+const deactivateForm = reactive({
+  leave_date: '',
+  disable_reason: '',
+})
+const bulkDisableForm = reactive({
+  leave_date: '',
+  disable_reason: '',
+})
+
+function emptyBulkUser(): AdminBulkUserItem {
+  return {
+    username: '',
+    password: '',
+    name: '',
+    employee_no: '',
+    phone: '',
+    email: '',
+    title: '',
+  }
+}
 
 const selectedCreateOrg = computed(() =>
   options.value?.orgs.find((o) => o.id === createForm.org_id),
@@ -97,6 +146,9 @@ const createStageOptions = computed(() =>
 const permissionStageOptions = computed(() =>
   stagesForUnit(permissionForm.unit_code as UnitCode | null),
 )
+const bulkStageOptions = computed(() =>
+  stagesForUnit(bulkCreateForm.assignment.unit_code),
+)
 
 onMounted(loadAll)
 
@@ -111,6 +163,9 @@ async function loadAll() {
     overview.value = ov
     options.value = opts
     users.value = list
+    selectedUsers.value = []
+    await nextTick()
+    userTableRef.value?.clearSelection()
   } catch (e) {
     ElMessage.error(explainApiError(e))
   } finally {
@@ -122,6 +177,9 @@ async function loadUsers() {
   loading.value = true
   try {
     users.value = await adminApi.users(keyword.value || undefined)
+    selectedUsers.value = []
+    await nextTick()
+    userTableRef.value?.clearSelection()
   } catch (e) {
     ElMessage.error(explainApiError(e))
   } finally {
@@ -138,6 +196,7 @@ function openCreate() {
     phone: '',
     email: '',
     title: '',
+    hire_date: todayString(),
     org_id: options.value?.orgs[0]?.id || '',
     is_superuser: false,
     is_unit_admin: false,
@@ -183,12 +242,13 @@ async function submitCreate() {
       phone: createForm.phone,
       email: createForm.email,
       title: createForm.title,
+      hire_date: createForm.hire_date || null,
       org_id: createForm.org_id,
       is_superuser: isSuperAdmin.value ? createForm.is_superuser : false,
       is_unit_admin: isSuperAdmin.value ? createForm.is_unit_admin : false,
       assignments,
     })
-    ElMessage.success('账号已创建')
+    ElMessage.success('账号已创建；员工首次登录必须修改初始密码')
     createVisible.value = false
     await loadAll()
   } catch (e) {
@@ -199,6 +259,10 @@ async function submitCreate() {
 }
 
 function openPermission(user: AdminUser) {
+  if (!user.is_active) {
+    ElMessage.warning('账号已停用，请先启用账号后再分配项目权限')
+    return
+  }
   targetUser.value = user
   Object.assign(permissionForm, {
     project_id: options.value?.projects[0]?.id || '',
@@ -251,6 +315,9 @@ function openEdit(user: AdminUser) {
     phone: user.phone || '',
     email: user.email || '',
     title: user.title || '',
+    hire_date: user.hire_date || '',
+    leave_date: user.leave_date || '',
+    disable_reason: user.disable_reason || '',
     is_unit_admin: user.orgs[0]?.is_unit_admin || false,
   })
   editVisible.value = true
@@ -269,6 +336,9 @@ async function submitEdit() {
       phone: editForm.phone || null,
       email: editForm.email || null,
       title: editForm.title || null,
+      hire_date: editForm.hire_date || null,
+      leave_date: editForm.leave_date || null,
+      disable_reason: editForm.disable_reason || null,
     }
     await adminApi.updateUser(
       targetUser.value.id,
@@ -298,7 +368,7 @@ async function submitReset() {
   saving.value = true
   try {
     await adminApi.resetPassword(targetUser.value.id, resetForm.password)
-    ElMessage.success('密码已重置')
+    ElMessage.success('密码已重置；用户下次登录必须先修改密码')
     resetVisible.value = false
   } catch (e) {
     ElMessage.error(explainApiError(e))
@@ -307,15 +377,47 @@ async function submitReset() {
   }
 }
 
-async function toggleActive(user: AdminUser) {
-  const action = user.is_active ? '停用' : '启用'
-  const message = user.is_active
-    ? `停用「${user.name}」后，该账号将立即退出并失去全部项目权限，但账号和历史记录会保留。确定停用吗？`
-    : `确定重新启用账号「${user.name}」吗？项目权限需要重新分配。`
+function openDeactivate(user: AdminUser) {
+  deactivateTarget.value = user
+  Object.assign(deactivateForm, {
+    leave_date: todayString(),
+    disable_reason: '离职',
+  })
+  deactivateVisible.value = true
+}
+
+async function submitDeactivate() {
+  if (!deactivateTarget.value) return
+  saving.value = true
   try {
-    await ElMessageBox.confirm(message, `${action}账号`, { type: 'warning' })
-    await adminApi.updateUser(user.id, { is_active: !user.is_active })
-    ElMessage.success(`账号已${action}`)
+    await adminApi.updateUser(deactivateTarget.value.id, {
+      is_active: false,
+      leave_date: deactivateForm.leave_date || todayString(),
+      disable_reason: deactivateForm.disable_reason || '离职',
+    })
+    ElMessage.success('账号已停用，项目权限已吊销')
+    deactivateVisible.value = false
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function toggleActive(user: AdminUser) {
+  if (user.is_active) {
+    openDeactivate(user)
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定重新启用账号「${user.name}」吗？停用信息会清空，项目权限需要重新分配。`,
+      '启用账号',
+      { type: 'warning' },
+    )
+    await adminApi.updateUser(user.id, { is_active: true })
+    ElMessage.success('账号已启用，请重新分配项目权限')
     await loadAll()
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') ElMessage.error(explainApiError(e))
@@ -326,6 +428,139 @@ function canManageRow(user: AdminUser) {
   if (isSuperAdmin.value) return true
   if (user.is_superuser) return false
   return !isUnitAdmin(user) || user.id === auth.user?.id
+}
+
+function canAssignPermission(user: AdminUser) {
+  return user.is_active && canManageRow(user)
+}
+
+function handleSelectionChange(rows: AdminUser[]) {
+  selectedUsers.value = rows
+}
+
+function canSelectForDisable(user: AdminUser) {
+  return (
+    user.is_active &&
+    !user.is_superuser &&
+    !isUnitAdmin(user) &&
+    user.id !== auth.user?.id &&
+    canManageRow(user)
+  )
+}
+
+function openBulkCreate() {
+  const firstOrg = options.value?.orgs[0]
+  bulkRows.value = [emptyBulkUser()]
+  Object.assign(bulkCreateForm, {
+    org_id: firstOrg?.id || '',
+    hire_date: todayString(),
+    assignment: {
+      project_id: '',
+      unit_code: (firstOrg?.unit_code as UnitCode | null) || null,
+      stage_scope: [],
+      responsibility: null,
+    },
+  })
+  bulkCreateVisible.value = true
+}
+
+function addBulkRow() {
+  bulkRows.value.push(emptyBulkUser())
+}
+
+function removeBulkRow(index: number) {
+  if (bulkRows.value.length <= 1) {
+    bulkRows.value[0] = emptyBulkUser()
+    return
+  }
+  bulkRows.value.splice(index, 1)
+}
+
+function onBulkOrgChange() {
+  const org = options.value?.orgs.find((o) => o.id === bulkCreateForm.org_id)
+  bulkCreateForm.assignment.unit_code = (org?.unit_code as UnitCode | null) || null
+  const allowed = new Set(bulkStageOptions.value.map((s) => s.code))
+  bulkCreateForm.assignment.stage_scope = bulkCreateForm.assignment.stage_scope.filter((s) =>
+    allowed.has(s),
+  )
+}
+
+async function submitBulkCreate() {
+  if (!bulkCreateForm.org_id || bulkRows.value.length === 0) {
+    ElMessage.warning('请选择所属单位并至少填写一名员工')
+    return
+  }
+  for (let i = 0; i < bulkRows.value.length; i += 1) {
+    const row = bulkRows.value[i]
+    if (!row.username.trim() || !row.password || !row.name.trim()) {
+      ElMessage.warning(`第 ${i + 1} 行请填写登录账号、姓名和初始密码`)
+      return
+    }
+  }
+  saving.value = true
+  try {
+    const assignments: AdminPermissionAssignment[] = []
+    if (bulkCreateForm.assignment.project_id) {
+      assignments.push({
+        project_id: bulkCreateForm.assignment.project_id,
+        unit_code: bulkCreateForm.assignment.unit_code,
+        stage_scope: bulkCreateForm.assignment.stage_scope,
+        responsibility: null,
+      })
+    }
+    const result = await adminApi.bulkCreateUsers({
+      org_id: bulkCreateForm.org_id,
+      hire_date: bulkCreateForm.hire_date || null,
+      users: bulkRows.value.map((row) => ({
+        username: row.username.trim(),
+        password: row.password,
+        name: row.name.trim(),
+        employee_no: row.employee_no || null,
+        phone: row.phone || null,
+        email: row.email || null,
+        title: row.title || null,
+      })),
+      assignments,
+    })
+    ElMessage.success(`已批量创建 ${result.created_count} 个账号；首次登录必须修改初始密码`)
+    bulkCreateVisible.value = false
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  } finally {
+    saving.value = false
+  }
+}
+
+function openBulkDeactivate() {
+  if (selectedUsers.value.length === 0) {
+    ElMessage.warning('请先勾选要停用的员工')
+    return
+  }
+  Object.assign(bulkDisableForm, {
+    leave_date: todayString(),
+    disable_reason: '离职',
+  })
+  bulkDeactivateVisible.value = true
+}
+
+async function submitBulkDeactivate() {
+  if (selectedUsers.value.length === 0) return
+  saving.value = true
+  try {
+    const result = await adminApi.bulkDeactivateUsers({
+      user_ids: selectedUsers.value.map((u) => u.id),
+      leave_date: bulkDisableForm.leave_date || todayString(),
+      disable_reason: bulkDisableForm.disable_reason || '离职',
+    })
+    ElMessage.success(`已批量停用 ${result.disabled_count} 个账号`)
+    bulkDeactivateVisible.value = false
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  } finally {
+    saving.value = false
+  }
 }
 
 async function revokeMembership(user: AdminUser, membership: AdminMembership) {
@@ -420,8 +655,8 @@ function stageScopeText(user: AdminUser) {
       <div class="panel-head">
         <div>
           <h3>{{ isUnitScope ? '本部门员工账号与权限' : '员工账号与权限' }}</h3>
-          <p v-if="isUnitScope">可创建本部门账号、分配本部门参与项目；停用账号会同时取消全部项目权限。</p>
-          <p v-else>管理员创建账号后，可继续为员工分配多个项目权限。</p>
+          <p v-if="isUnitScope">可单个或批量创建本部门账号；停用账号会同时取消全部项目权限。</p>
+          <p v-else>支持批量入职、批量停用，以及单个账号的项目权限管理。</p>
         </div>
         <div class="panel-actions">
           <el-input
@@ -439,11 +674,28 @@ function stageScopeText(user: AdminUser) {
             <el-icon><Plus /></el-icon>
             创建账号
           </el-button>
+          <el-button @click="openBulkCreate">批量入职</el-button>
+          <el-button
+            type="warning"
+            plain
+            :disabled="selectedUsers.length === 0"
+            @click="openBulkDeactivate"
+          >
+            批量停用{{ selectedUsers.length ? `（${selectedUsers.length}）` : '' }}
+          </el-button>
         </div>
       </div>
 
-      <el-table v-loading="loading" :data="users" row-key="id" class="user-table">
-        <el-table-column label="账号" min-width="190">
+      <el-table
+        ref="userTableRef"
+        v-loading="loading"
+        :data="users"
+        row-key="id"
+        class="user-table"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="canSelectForDisable" />
+        <el-table-column label="账号" min-width="220">
           <template #default="{ row }">
             <div class="account-cell">
               <span class="avatar">{{ row.name?.charAt(0) || '?' }}</span>
@@ -460,6 +712,14 @@ function stageScopeText(user: AdminUser) {
                   >
                     部门管理员
                   </el-tag>
+                  <el-tag
+                    v-if="row.must_change_password"
+                    size="small"
+                    type="warning"
+                    effect="plain"
+                  >
+                    待改密
+                  </el-tag>
                 </div>
                 <div class="sub">{{ row.username }}<template v-if="row.employee_no"> · {{ row.employee_no }}</template></div>
               </div>
@@ -470,6 +730,14 @@ function stageScopeText(user: AdminUser) {
           <template #default="{ row }">
             <div>{{ orgNames(row) }}</div>
             <div v-if="row.title" class="sub">{{ row.title }}</div>
+            <div v-if="row.hire_date" class="sub">入职 {{ row.hire_date }}</div>
+            <div v-if="row.leave_date" class="sub">离职 {{ row.leave_date }}</div>
+            <div v-if="row.disable_reason && !row.is_active" class="sub">
+              停用原因：{{ row.disable_reason }}
+            </div>
+            <div v-if="row.last_password_changed_at" class="sub">
+              最近改密 {{ row.last_password_changed_at.slice(0, 10) }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="项目权限" min-width="240">
@@ -482,17 +750,25 @@ function stageScopeText(user: AdminUser) {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
+        <el-table-column label="状态" width="150" align="center">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'" size="small" effect="light">
               {{ row.is_active ? '启用' : '已停用' }}
             </el-tag>
+            <div v-if="!row.is_active && row.disabled_by_name" class="sub">
+              由 {{ row.disabled_by_name }} 停用
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="430" fixed="right">
           <template #default="{ row }">
             <el-button link @click="openMemberships(row)">项目权限</el-button>
-            <el-button v-if="canManageRow(row)" link type="primary" @click="openPermission(row)">
+            <el-button
+              v-if="canAssignPermission(row)"
+              link
+              type="primary"
+              @click="openPermission(row)"
+            >
               分配权限
             </el-button>
             <el-button v-if="canManageRow(row)" link @click="openEdit(row)">编辑资料</el-button>
@@ -519,7 +795,15 @@ function stageScopeText(user: AdminUser) {
         :closable="false"
         show-icon
         class="scope-alert"
-        title="部门管理员只能在本部门创建账号；初始密码由你设置，后续重置密码需要联系总管理员。"
+        title="部门管理员只能在本部门创建账号；初始密码由你设置，新账号首次登录必须修改密码。"
+      />
+      <el-alert
+        v-if="isSuperAdmin"
+        type="info"
+        :closable="false"
+        show-icon
+        class="scope-alert"
+        title="新账号首次登录必须修改初始密码；管理员重置密码后也会要求再次修改。"
       />
       <el-form label-position="top" :model="createForm">
         <div class="form-grid">
@@ -543,6 +827,15 @@ function stageScopeText(user: AdminUser) {
           </el-form-item>
           <el-form-item label="职称">
             <el-input v-model="createForm.title" />
+          </el-form-item>
+          <el-form-item label="入职日期">
+            <el-date-picker
+              v-model="createForm.hire_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择入职日期"
+              style="width: 100%"
+            />
           </el-form-item>
           <el-form-item label="所属单位 *">
             <el-select v-model="createForm.org_id" style="width: 100%" @change="onCreateOrgChange">
@@ -607,6 +900,163 @@ function stageScopeText(user: AdminUser) {
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitCreate">创建账号</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量入职 -->
+    <el-dialog v-model="bulkCreateVisible" title="批量入职" width="1100px" destroy-on-close>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="scope-alert"
+        title="批量创建的账号首次登录必须修改初始密码；工号、邮箱和登录账号不能重复。"
+      />
+      <el-form label-position="top">
+        <div class="form-grid">
+          <el-form-item label="所属单位 *">
+            <el-select v-model="bulkCreateForm.org_id" style="width: 100%" @change="onBulkOrgChange">
+              <el-option v-for="o in options?.orgs || []" :key="o.id" :label="o.name" :value="o.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="入职日期">
+            <el-date-picker
+              v-model="bulkCreateForm.hire_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择入职日期"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="统一初始项目权限（可选）">
+            <el-select v-model="bulkCreateForm.assignment.project_id" clearable style="width: 100%">
+              <el-option
+                v-for="p in options?.projects || []"
+                :key="p.id"
+                :label="`${p.project_no} · ${p.name}`"
+                :value="p.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="参与单位">
+            <el-select v-model="bulkCreateForm.assignment.unit_code" disabled style="width: 100%">
+              <el-option v-for="u in options?.units || []" :key="u.code" :label="u.label" :value="u.code" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="统一可见阶段" class="span-2">
+            <el-select
+              v-model="bulkCreateForm.assignment.stage_scope"
+              multiple
+              collapse-tags
+              clearable
+              :placeholder="isUnitScope ? '不选表示本部门负责的全部阶段' : '不选表示全部阶段'"
+              style="width: 100%"
+            >
+              <el-option v-for="s in bulkStageOptions" :key="s.code" :label="s.label" :value="s.code" />
+            </el-select>
+          </el-form-item>
+        </div>
+      </el-form>
+
+      <div class="bulk-head">
+        <b>员工清单（{{ bulkRows.length }} 人）</b>
+        <el-button link type="primary" @click="addBulkRow">+ 添加一行</el-button>
+      </div>
+      <el-table :data="bulkRows" size="small" border>
+        <el-table-column label="登录账号 *" min-width="130">
+          <template #default="{ row }"><el-input v-model="row.username" placeholder="zhangsan" /></template>
+        </el-table-column>
+        <el-table-column label="姓名 *" min-width="110">
+          <template #default="{ row }"><el-input v-model="row.name" placeholder="员工姓名" /></template>
+        </el-table-column>
+        <el-table-column label="工号" min-width="110">
+          <template #default="{ row }"><el-input v-model="row.employee_no" /></template>
+        </el-table-column>
+        <el-table-column label="邮箱" min-width="170">
+          <template #default="{ row }"><el-input v-model="row.email" /></template>
+        </el-table-column>
+        <el-table-column label="初始密码 *" min-width="130">
+          <template #default="{ row }"><el-input v-model="row.password" type="password" show-password /></template>
+        </el-table-column>
+        <el-table-column label="手机" min-width="120">
+          <template #default="{ row }"><el-input v-model="row.phone" /></template>
+        </el-table-column>
+        <el-table-column label="职称" min-width="110">
+          <template #default="{ row }"><el-input v-model="row.title" /></template>
+        </el-table-column>
+        <el-table-column label="操作" width="70" align="center">
+          <template #default="{ $index }">
+            <el-button link type="danger" @click="removeBulkRow($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="bulkCreateVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitBulkCreate">
+          批量创建 {{ bulkRows.length }} 个账号
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 单个停用 -->
+    <el-dialog v-model="deactivateVisible" title="停用员工账号" width="500px">
+      <div v-if="deactivateTarget" class="target-user">
+        <b>{{ deactivateTarget.name }}</b>
+        <span>{{ deactivateTarget.username }} · {{ orgNames(deactivateTarget) }}</span>
+      </div>
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="scope-alert"
+        title="停用后会立即吊销全部项目权限，账号和历史记录保留。"
+      />
+      <el-form label-position="top" :model="deactivateForm">
+        <el-form-item label="离职/停用日期">
+          <el-date-picker
+            v-model="deactivateForm.leave_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="停用原因">
+          <el-input v-model="deactivateForm.disable_reason" placeholder="例如：离职、调岗、长期借调结束" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="deactivateVisible = false">取消</el-button>
+        <el-button type="danger" :loading="saving" @click="submitDeactivate">确认停用</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量停用 -->
+    <el-dialog v-model="bulkDeactivateVisible" title="批量停用员工账号" width="500px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="scope-alert"
+        :title="`已选择 ${selectedUsers.length} 名员工，确认后会立即吊销全部项目权限。`"
+      />
+      <el-form label-position="top" :model="bulkDisableForm">
+        <el-form-item label="统一离职/停用日期">
+          <el-date-picker
+            v-model="bulkDisableForm.leave_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="统一停用原因">
+          <el-input v-model="bulkDisableForm.disable_reason" placeholder="例如：离职、业务调整" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bulkDeactivateVisible = false">取消</el-button>
+        <el-button type="danger" :loading="saving" @click="submitBulkDeactivate">
+          确认批量停用
+        </el-button>
       </template>
     </el-dialog>
 
@@ -689,8 +1139,29 @@ function stageScopeText(user: AdminUser) {
           <el-form-item label="手机">
             <el-input v-model="editForm.phone" />
           </el-form-item>
-          <el-form-item label="邮箱" class="span-2">
+          <el-form-item label="邮箱">
             <el-input v-model="editForm.email" />
+          </el-form-item>
+          <el-form-item label="入职日期">
+            <el-date-picker
+              v-model="editForm.hire_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择入职日期"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item v-if="targetUser && !targetUser.is_active" label="离职日期">
+            <el-date-picker
+              v-model="editForm.leave_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择离职日期"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item v-if="targetUser && !targetUser.is_active" label="停用原因">
+            <el-input v-model="editForm.disable_reason" placeholder="例如：离职、调岗" />
           </el-form-item>
         </div>
         <el-checkbox v-if="isSuperAdmin" v-model="editForm.is_unit_admin">
@@ -740,7 +1211,7 @@ function stageScopeText(user: AdminUser) {
         <el-button @click="membershipVisible = false">关闭</el-button>
         <el-button
           type="primary"
-          :disabled="!targetUser || !canManageRow(targetUser)"
+          :disabled="!targetUser || !canAssignPermission(targetUser)"
           @click="continueAssignFromMemberships"
         >
           继续分配权限
@@ -751,6 +1222,13 @@ function stageScopeText(user: AdminUser) {
     <!-- 重置密码 -->
     <el-dialog v-model="resetVisible" title="重置密码" width="430px">
       <p class="reset-user">为「{{ targetUser?.name }}」设置新密码</p>
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="scope-alert"
+        title="重置后旧会话会立即失效，用户下次登录必须先修改密码。"
+      />
       <el-input v-model="resetForm.password" type="password" show-password placeholder="至少 6 位" />
       <template #footer>
         <el-button @click="resetVisible = false">取消</el-button>
@@ -923,6 +1401,15 @@ function stageScopeText(user: AdminUser) {
   display: flex;
   align-items: center;
   gap: 22px;
+}
+
+.bulk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0 10px;
+  color: #1f2a3d;
+  font-size: 13px;
 }
 
 .permission-box {

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import func, select
 
@@ -22,6 +22,7 @@ from app.api.deps import (
     require_action,
     require_project_view,
 )
+from app.core.upload_formats import validate_catalog_extension
 from app.models.document import Document, DocumentRelation, DocumentVersion, FileObject
 from app.models.enums import (
     DOCUMENT_STATE_LABELS,
@@ -373,6 +374,111 @@ async def upload_version(
     )
     _audit(db, principal, "CREATE", "document_version", v.id,
            f"{doc.title} {v.version_no}", doc.project_id, doc.stage_code)
+    db.commit()
+    return ApiResponse(data=_version_out(db, principal, v, doc))
+
+
+@router.post(
+    "/projects/{project_id}/catalog-documents/{doc_code}/versions",
+    response_model=ApiResponse[DocumentVersionOut],
+    summary="按标准文档清单项上传文件",
+)
+async def upload_catalog_document_version(
+    project_id: str,
+    doc_code: str,
+    db: DbSession,
+    principal: CurrentPrincipal,
+    file: Annotated[UploadFile, File(description="文件本体")],
+    change_summary: Annotated[str | None, Form()] = None,
+) -> ApiResponse[DocumentVersionOut]:
+    """把上传文件绑定到标准清单中的具体条目。
+
+    清单项以 ``doc_no=doc_code`` 映射到 Document：
+    - 首次上传自动创建文档；
+    - 再次上传则追加新版本，保留完整版本历史；
+    - 扩展名按清单项的 ``file_formats`` 在后端再次校验。
+    """
+    from app.api.catalog import _load_catalog
+
+    item = next((row for row in _load_catalog() if row.get("doc_code") == doc_code), None)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 4004, "message": "标准文档清单项不存在"},
+        )
+
+    try:
+        stage_code = StageCode(item["stage_code"])
+    except (KeyError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": 4000, "message": "清单项未关联有效阶段"},
+        )
+
+    require_action(principal, PermissionAction.EDIT, project_id, stage_code.value)
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": 1001, "message": "缺少文件名"},
+        )
+    try:
+        validate_catalog_extension(file.filename, item.get("file_formats"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": 1001, "message": str(exc)},
+        ) from exc
+
+    doc = db.execute(
+        select(Document).where(
+            Document.project_id == project_id,
+            Document.stage_code == stage_code.value,
+            Document.doc_no == doc_code,
+        )
+    ).scalars().first()
+    if doc is None:
+        doc = Document(
+            project_id=project_id,
+            stage_code=stage_code.value,
+            category_name="标准文档清单",
+            title=item["doc_name"],
+            doc_no=doc_code,
+            discipline="桩基工程",
+            secret_level=SecretLevel.INTERNAL.value,
+            created_by=principal.user_id,
+            remark=item.get("description"),
+        )
+        db.add(doc)
+        db.flush()
+        _audit(
+            db,
+            principal,
+            "CREATE",
+            "document",
+            doc.id,
+            doc.title,
+            project_id,
+            stage_code.value,
+        )
+
+    fo = await storage.save_upload(db, file, principal.user_id)
+    v = docsvc.create_version(
+        db,
+        document=doc,
+        file_id=fo.file_id,
+        change_summary=change_summary or f"按标准文档清单 {doc_code} 上传",
+        creator_id=principal.user_id,
+    )
+    _audit(
+        db,
+        principal,
+        "CREATE",
+        "document_version",
+        v.id,
+        f"{doc.title} {v.version_no}",
+        project_id,
+        stage_code.value,
+    )
     db.commit()
     return ApiResponse(data=_version_out(db, principal, v, doc))
 

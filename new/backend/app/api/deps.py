@@ -8,10 +8,11 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.database import get_db
 from app.core.permissions import Principal, build_principal
 from app.core.security import decode_token
@@ -32,6 +33,8 @@ from app.models.org import AppUser
 ERR_UNAUTHORIZED = 2001      # 未登录 / token 无效
 ERR_TOKEN_EXPIRED = 2002     # token 过期
 ERR_USER_DISABLED = 2003     # 账号被禁用
+ERR_TOKEN_REVOKED = 2006     # token 已失效（密码重置/停用后旧会话）
+ERR_PASSWORD_CHANGE_REQUIRED = 2007  # 首次登录/重置密码后必须先改密
 ERR_NO_ROLE = 3001           # 无角色（不在项目成员里）
 ERR_NO_DATA_SCOPE = 3002     # 有角色但无数据范围
 ERR_STAGE_DENIED = 3003      # 阶段范围不允许
@@ -39,6 +42,7 @@ ERR_STAGE_DENIED = 3003      # 阶段范围不允许
 
 def get_current_user(
     db: Annotated[Session, Depends(get_db)],
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> AppUser:
     """从 Authorization: Bearer <token> 解析当前用户。"""
@@ -71,11 +75,29 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": ERR_UNAUTHORIZED, "message": "用户不存在"},
         )
+    if int(payload.get("ver", 0)) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": ERR_TOKEN_REVOKED, "message": "登录状态已失效，请重新登录"},
+        )
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": ERR_USER_DISABLED, "message": "账号已被禁用"},
         )
+    if user.must_change_password:
+        allowed_paths = {
+            f"{settings.API_PREFIX}/auth/me",
+            f"{settings.API_PREFIX}/auth/change-password",
+        }
+        if request.url.path.rstrip("/") not in allowed_paths:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": ERR_PASSWORD_CHANGE_REQUIRED,
+                    "message": "首次登录或密码被重置后，请先修改登录密码",
+                },
+            )
     return user
 
 

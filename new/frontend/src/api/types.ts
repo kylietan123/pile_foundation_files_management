@@ -226,6 +226,11 @@ export interface TokenPair {
   refresh_token: string
   token_type: string
   expires_in: number
+  must_change_password: boolean
+}
+
+export interface PasswordChangeOut extends TokenPair {
+  message: string
 }
 
 export interface OrgBrief {
@@ -271,6 +276,7 @@ export interface CurrentUser {
   email?: string | null
   title?: string | null
   is_superuser: boolean
+  must_change_password: boolean
   orgs: OrgBrief[]
   memberships: Membership[]
 }
@@ -317,6 +323,8 @@ export interface CatalogDocument {
   responsible_unit_name: string
   doc_name: string
   file_formats: string
+  /** 后端根据清单项业务格式推导出的允许扩展名，如 [".pdf", ".dwg"] */
+  allowed_extensions: string[]
   is_required: boolean
   need_approval: boolean
   description?: string | null
@@ -1400,6 +1408,13 @@ export interface AdminUser {
   title?: string | null
   is_active: boolean
   is_superuser: boolean
+  must_change_password: boolean
+  hire_date?: string | null
+  leave_date?: string | null
+  disabled_at?: string | null
+  disabled_by_name?: string | null
+  disable_reason?: string | null
+  last_password_changed_at?: string | null
   orgs: AdminOrg[]
   memberships: AdminMembership[]
   created_at?: string | null
@@ -1413,10 +1428,44 @@ export interface AdminUserCreateIn {
   phone?: string | null
   email?: string | null
   title?: string | null
+  hire_date?: string | null
   org_id: string
   is_superuser?: boolean
   is_unit_admin?: boolean
   assignments?: AdminPermissionAssignment[]
+}
+
+export interface AdminBulkUserItem {
+  username: string
+  password: string
+  name: string
+  employee_no?: string | null
+  phone?: string | null
+  email?: string | null
+  title?: string | null
+}
+
+export interface AdminBulkUserCreateIn {
+  org_id: string
+  hire_date?: string | null
+  users: AdminBulkUserItem[]
+  assignments?: AdminPermissionAssignment[]
+}
+
+export interface AdminBulkDisableIn {
+  user_ids: string[]
+  leave_date?: string | null
+  disable_reason?: string | null
+}
+
+export interface AdminBulkUserCreateOut {
+  created_count: number
+  users: AdminUser[]
+}
+
+export interface AdminBulkDisableOut {
+  disabled_count: number
+  users: AdminUser[]
 }
 
 export interface AdminUserUpdateIn {
@@ -1425,8 +1474,11 @@ export interface AdminUserUpdateIn {
   phone?: string | null
   email?: string | null
   title?: string | null
+  hire_date?: string | null
+  leave_date?: string | null
   is_active?: boolean
   is_unit_admin?: boolean
+  disable_reason?: string | null
 }
 
 export interface AdminOptions {

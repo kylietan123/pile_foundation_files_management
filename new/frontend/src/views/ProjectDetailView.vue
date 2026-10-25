@@ -13,16 +13,25 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import type { UploadFile } from 'element-plus'
 
-import { catalogApi, projectApi } from '@/api'
+import { catalogApi, documentApi, projectApi } from '@/api'
 import { explainApiError } from '@/api/http'
 import type {
   CatalogDocument,
+  DocumentInfo,
   ProjectMemberCandidate,
   ProjectMemberCreateIn,
   ProjectMemberInfo,
 } from '@/api/types'
-import { PROJECT_STATUS_LABEL, STAGE_LABEL, STAGE_ORDER, UNIT_LABEL } from '@/api/types'
+import {
+  DOCUMENT_STATE_LABEL,
+  DOCUMENT_STATE_TAG,
+  PROJECT_STATUS_LABEL,
+  STAGE_LABEL,
+  STAGE_ORDER,
+  UNIT_LABEL,
+} from '@/api/types'
 import type { Responsibility, StageCode, UnitCode } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectStore } from '@/stores/project'
@@ -38,6 +47,17 @@ const members = ref<ProjectMemberInfo[]>([])
 const membersError = ref<string | null>(null)
 const catalog = ref<CatalogDocument[]>([])
 const catalogError = ref<string | null>(null)
+const stageDocuments = ref<DocumentInfo[]>([])
+const stageDocumentsError = ref<string | null>(null)
+
+/** 标准清单直接上传 */
+const catalogUploadVisible = ref(false)
+const catalogUploadItem = ref<CatalogDocument | null>(null)
+const catalogUploadFile = ref<File | null>(null)
+const catalogUploadSummary = ref('')
+const catalogUploading = ref(false)
+const catalogUploadKey = ref(0)
+
 const memberDialogVisible = ref(false)
 const memberCandidates = ref<ProjectMemberCandidate[]>([])
 const memberSaving = ref(false)
@@ -60,6 +80,7 @@ onMounted(async () => {
   } catch (e) {
     catalogError.value = explainApiError(e)
   }
+  await loadStageDocuments()
 })
 
 const p = computed(() => projectStore.current)
@@ -106,6 +127,184 @@ const currentCatalogByUnit = computed(() => {
   }
   return Array.from(groups.entries()).map(([unit, items]) => ({ unit, items }))
 })
+
+const uploadedCatalogCount = computed(
+  () => currentCatalog.value.filter((item) => !!catalogDocumentFor(item)).length,
+)
+
+const activeCatalogDocument = computed(() =>
+  catalogUploadItem.value ? catalogDocumentFor(catalogUploadItem.value) : undefined,
+)
+
+const catalogAccept = computed(() =>
+  (catalogUploadItem.value ? catalogExtensions(catalogUploadItem.value) : []).join(','),
+)
+
+const catalogUploadBlocked = computed(() =>
+  ['CHECKING', 'REVIEWING', 'APPROVED'].includes(
+    activeCatalogDocument.value?.latest_state || '',
+  ),
+)
+
+async function loadStageDocuments() {
+  const stage = p.value?.current_stage_code
+  if (!stage) return
+  stageDocumentsError.value = null
+  try {
+    stageDocuments.value = await documentApi.list(projectId.value, {
+      stage,
+      with_versions: true,
+    })
+  } catch (e) {
+    stageDocumentsError.value = explainApiError(e)
+  }
+}
+
+function catalogDocumentFor(item: CatalogDocument): DocumentInfo | undefined {
+  return stageDocuments.value.find((doc) => doc.doc_no === item.doc_code)
+}
+
+function catalogExtensions(item: CatalogDocument): string[] {
+  return item.allowed_extensions?.length ? item.allowed_extensions : ['.pdf']
+}
+
+function catalogFormatText(item: CatalogDocument): string {
+  return catalogExtensions(item).map((ext) => ext.replace('.', '').toUpperCase()).join(' / ')
+}
+
+function catalogStatusLabel(item: CatalogDocument): string {
+  const doc = catalogDocumentFor(item)
+  if (!doc) return '未上传'
+  if (doc.current_version_id) return `已发布 ${doc.published_version_no || ''}`.trim()
+  if (doc.latest_version_no) {
+    const state = doc.latest_state ? DOCUMENT_STATE_LABEL[doc.latest_state] : '处理中'
+    return `${doc.latest_version_no} · ${state}`
+  }
+  return '待上传版本'
+}
+
+function catalogStatusTag(item: CatalogDocument): 'success' | 'info' | 'warning' | 'danger' | 'primary' {
+  const doc = catalogDocumentFor(item)
+  if (doc?.current_version_id) return 'success'
+  if (doc?.latest_state) return DOCUMENT_STATE_TAG[doc.latest_state]
+  return 'info'
+}
+
+const canUploadCurrentCatalog = computed(
+  () =>
+    p.value?.status !== 'PREPARING' &&
+    !!p.value?.current_stage_code &&
+    canEnterStage(p.value.current_stage_code) &&
+    !!myMembership.value?.actions.includes('EDIT'),
+)
+
+type StageWorkEntry = {
+  key: string
+  label: string
+  type?: 'primary' | 'warning'
+  routeName?: string
+  query?: Record<string, string>
+  action?: 'stage-catalog'
+}
+
+const stageWorkEntries = computed<StageWorkEntry[]>(() => {
+  const code = p.value?.current_stage_code
+  if (code === 'DESIGN') {
+    return [
+      { key: 'design-inputs', label: '设计输入管理', type: 'primary', routeName: 'design-inputs' },
+      { key: 'documents', label: '文件与版本', routeName: 'documents', query: { stage: 'DESIGN' } },
+      { key: 'changes', label: '设计变更', routeName: 'changes', query: { stage: 'DESIGN' } },
+      { key: 'issues', label: '问题管理', routeName: 'issues', query: { stage: 'DESIGN' } },
+      { key: 'deliverables', label: '设计成果与交付', type: 'primary', routeName: 'deliverables' },
+      { key: 'ledger', label: '文件台账与追溯', type: 'warning', routeName: 'ledger', query: { stage: 'DESIGN' } },
+      { key: 'ai', label: 'AI 助手', routeName: 'ai', query: { project: projectId.value, stage: 'DESIGN' } },
+    ] as StageWorkEntry[]
+  }
+  if (code === 'CONSTRUCTION') {
+    return [
+      { key: 'construction-catalog', label: '施工资料上传', type: 'primary', action: 'stage-catalog' },
+      { key: 'documents', label: '施工文件与版本', routeName: 'documents', query: { stage: 'CONSTRUCTION' } },
+      { key: 'changes', label: '设计变更影响', routeName: 'changes', query: { stage: 'CONSTRUCTION' } },
+      { key: 'issues', label: '现场问题管理', routeName: 'issues', query: { stage: 'CONSTRUCTION' } },
+      { key: 'ledger', label: '文件台账与签认', type: 'warning', routeName: 'ledger', query: { stage: 'CONSTRUCTION' } },
+    ] as StageWorkEntry[]
+  }
+  const stageLabel = code ? STAGE_LABEL[code as StageCode] : '当前阶段'
+  return [
+    { key: 'catalog', label: `${stageLabel}资料归档`, type: 'primary', action: 'stage-catalog' },
+    { key: 'documents', label: `${stageLabel}文件与版本`, routeName: 'documents', query: code ? { stage: code } : undefined },
+    { key: 'issues', label: '问题管理', routeName: 'issues', query: code ? { stage: code } : undefined },
+    { key: 'ledger', label: '文件台账与追溯', type: 'warning', routeName: 'ledger', query: code ? { stage: code } : undefined },
+    { key: 'ai', label: 'AI 助手', routeName: 'ai', query: { project: projectId.value, ...(code ? { stage: code } : {}) } },
+  ] as StageWorkEntry[]
+})
+
+function openStageWork(entry: StageWorkEntry) {
+  if (entry.action === 'stage-catalog') {
+    document.getElementById('stage-catalog')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (!entry.routeName) return
+  router.push({
+    name: entry.routeName,
+    params: entry.routeName === 'my-work' || entry.routeName === 'ai' ? undefined : { id: projectId.value },
+    query: entry.query,
+  })
+}
+
+function openCatalogUpload(item: CatalogDocument) {
+  if (!canUploadCurrentCatalog.value) {
+    ElMessage.warning('你当前没有本阶段文件上传权限')
+    return
+  }
+  catalogUploadItem.value = item
+  catalogUploadFile.value = null
+  catalogUploadSummary.value = ''
+  catalogUploadKey.value += 1
+  catalogUploadVisible.value = true
+}
+
+function onCatalogFileChange(file: UploadFile) {
+  const raw = (file.raw as File | undefined) || null
+  const item = catalogUploadItem.value
+  if (!raw || !item) return
+  const ext = `.${raw.name.split('.').pop()?.toLowerCase() || ''}`
+  if (!catalogExtensions(item).includes(ext)) {
+    ElMessage.warning(`“${item.doc_name}”仅支持：${catalogFormatText(item)}`)
+    catalogUploadFile.value = null
+    catalogUploadKey.value += 1
+    return
+  }
+  catalogUploadFile.value = raw
+}
+
+function onCatalogFileRemove() {
+  catalogUploadFile.value = null
+}
+
+async function doCatalogUpload() {
+  const item = catalogUploadItem.value
+  if (!item || !catalogUploadFile.value) {
+    ElMessage.warning('请先选择要上传的文件')
+    return
+  }
+  catalogUploading.value = true
+  try {
+    const version = await catalogApi.uploadDocument(
+      projectId.value,
+      item.doc_code,
+      catalogUploadFile.value,
+      catalogUploadSummary.value,
+    )
+    ElMessage.success(`“${item.doc_name}”已上传，生成版本 ${version.version_no}`)
+    catalogUploadVisible.value = false
+    await loadStageDocuments()
+  } catch (e) {
+    ElMessage.error(explainApiError(e))
+  } finally {
+    catalogUploading.value = false
+  }
+}
 
 /** 我在此项目的成员关系 */
 const myMembership = computed(() => auth.membershipOf(projectId.value))
@@ -306,36 +505,16 @@ const activity = computed(() => {
       <div v-if="p.status !== 'PREPARING' && canEnterStage(p.current_stage_code)" class="entries app-card">
         <span class="el-label">进入工作：</span>
         <el-button
-          v-if="p.current_stage_code === 'DESIGN' || canEnterStage('DESIGN')"
+          v-for="entry in stageWorkEntries"
+          :key="entry.key"
           size="small"
-          type="primary"
-          plain
-          @click="router.push({ name: 'design-inputs', params: { id: projectId } })"
+          :type="entry.type"
+          :plain="!!entry.type"
+          @click="openStageWork(entry)"
         >
-          设计输入管理
-        </el-button>
-        <el-button
-          size="small"
-          plain
-          @click="router.push({ name: 'documents', params: { id: projectId } })"
-        >
-          文件与版本
-        </el-button>
-        <el-button
-          size="small"
-          plain
-          @click="router.push({ name: 'changes', params: { id: projectId } })"
-        >
-          设计变更
-        </el-button>
-        <el-button
-          size="small"
-          plain
-          @click="router.push({ name: 'issues', params: { id: projectId } })"
-        >
-          问题管理
+          {{ entry.label }}
           <el-tag
-            v-if="p.open_issue_count"
+            v-if="entry.key === 'issues' && p.open_issue_count"
             size="small"
             type="danger"
             effect="dark"
@@ -344,32 +523,6 @@ const activity = computed(() => {
             {{ p.open_issue_count }}
           </el-tag>
         </el-button>
-        <el-button
-          size="small"
-          type="primary"
-          plain
-          @click="router.push({ name: 'deliverables', params: { id: projectId } })"
-        >
-          设计成果与交付
-        </el-button>
-        <el-button
-          size="small"
-          type="warning"
-          plain
-          @click="router.push({ name: 'ledger', params: { id: projectId } })"
-        >
-          文件台账与追溯
-        </el-button>
-        <el-button
-          size="small"
-          plain
-          @click="router.push({ name: 'ai', query: { project: projectId } })"
-        >
-          AI 助手
-        </el-button>
-        <span class="el-hint t-grey">
-          后续迭代补齐：设计参数库 / 桩型智能选型
-        </span>
       </div>
 
       <!-- 7 阶段导航 -->
@@ -544,13 +697,27 @@ const activity = computed(() => {
         </div>
       </div>
 
-      <!-- 标准文档清单：从 kylie 版 84 类清单并入，作为阶段应上传基线 -->
-      <div class="app-card pad catalog-card" style="margin-top: 16px">
+      <!-- 标准文档清单：每一项既是上传基线，也是可直接操作的文件入口 -->
+      <div id="stage-catalog" class="app-card pad catalog-card" style="margin-top: 16px">
         <div class="sec-title">
           当前阶段标准文档清单
-          <span class="more">kylie 版 84 类模板 · 本阶段 {{ currentCatalog.length }} 类</span>
+          <span class="more">已上传 {{ uploadedCatalogCount }} / {{ currentCatalog.length }} 类</span>
+        </div>
+        <div class="catalog-help">
+          <span>点击清单项，将文件上传到对应文档；再次上传会生成新版本。</span>
+          <el-tag v-if="canUploadCurrentCatalog" size="small" type="success" effect="plain">
+            当前单位可上传
+          </el-tag>
+          <el-tag v-else size="small" type="info" effect="plain">当前单位仅可查看</el-tag>
         </div>
         <el-alert v-if="catalogError" :title="catalogError" type="warning" :closable="false" show-icon />
+        <el-alert
+          v-if="stageDocumentsError"
+          :title="`上传状态读取失败：${stageDocumentsError}`"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
         <div v-else-if="currentCatalogByUnit.length" class="catalog-groups">
           <section v-for="group in currentCatalogByUnit" :key="group.unit" class="catalog-group">
             <div class="catalog-unit">
@@ -558,10 +725,38 @@ const activity = computed(() => {
               <span>{{ group.items.length }} 类</span>
             </div>
             <div class="catalog-items">
-              <div v-for="item in group.items" :key="item.doc_code" class="catalog-item">
+              <div
+                v-for="item in group.items"
+                :key="item.doc_code"
+                class="catalog-item"
+                :class="{
+                  uploaded: !!catalogDocumentFor(item),
+                  clickable: canUploadCurrentCatalog,
+                }"
+                role="button"
+                :tabindex="canUploadCurrentCatalog ? 0 : -1"
+                @click="openCatalogUpload(item)"
+                @keydown.enter.prevent="openCatalogUpload(item)"
+              >
                 <span class="catalog-code">{{ item.doc_code }}</span>
-                <span class="catalog-name">{{ item.doc_name }}</span>
-                <el-tag size="small" effect="plain">{{ item.file_formats }}</el-tag>
+                <span class="catalog-main">
+                  <span class="catalog-name">
+                    {{ item.doc_name }}
+                    <em v-if="item.is_required">必备</em>
+                  </span>
+                  <span class="catalog-formats">
+                    <el-tag size="small" effect="plain">{{ item.file_formats }}</el-tag>
+                    <span>{{ catalogFormatText(item) }}</span>
+                  </span>
+                </span>
+                <span class="catalog-state">
+                  <el-tag size="small" :type="catalogStatusTag(item)" effect="light">
+                    {{ catalogStatusLabel(item) }}
+                  </el-tag>
+                  <span v-if="canUploadCurrentCatalog" class="catalog-action">
+                    {{ catalogDocumentFor(item) ? '上传新版本' : '上传文件' }} →
+                  </span>
+                </span>
               </div>
             </div>
           </section>
@@ -647,6 +842,83 @@ const activity = computed(() => {
         <el-button @click="memberDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="memberSaving" @click="addProjectMember">
           添加到项目
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="catalogUploadVisible"
+      :title="activeCatalogDocument ? '上传新版本' : '上传标准清单文件'"
+      width="620px"
+      destroy-on-close
+    >
+      <template v-if="catalogUploadItem">
+        <div class="upload-target">
+          <div class="upload-target-code">{{ catalogUploadItem.doc_code }}</div>
+          <div>
+            <b>{{ catalogUploadItem.doc_name }}</b>
+            <p>{{ catalogUploadItem.description || '按当前阶段标准文档清单归档。' }}</p>
+          </div>
+        </div>
+
+        <el-descriptions :column="2" border size="small" class="upload-desc">
+          <el-descriptions-item label="责任单位">
+            {{ catalogUploadItem.responsible_unit_name }}
+          </el-descriptions-item>
+          <el-descriptions-item label="当前状态">
+            {{ catalogStatusLabel(catalogUploadItem) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="清单文件类型">
+            {{ catalogUploadItem.file_formats }}
+          </el-descriptions-item>
+          <el-descriptions-item label="允许扩展名">
+            {{ catalogFormatText(catalogUploadItem) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-alert
+          v-if="catalogUploadBlocked"
+          title="该文档已有审批中的版本，需完成或退回后才能上传新版本。"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 14px"
+        />
+
+        <el-upload
+          :key="catalogUploadKey"
+          drag
+          :auto-upload="false"
+          :limit="1"
+          :accept="catalogAccept"
+          :on-change="onCatalogFileChange"
+          :on-remove="onCatalogFileRemove"
+        >
+          <div class="upload-drop-title">将文件拖到此处，或点击选择</div>
+          <div class="upload-drop-hint">
+            仅接受 {{ catalogFormatText(catalogUploadItem) }}
+          </div>
+        </el-upload>
+
+        <el-input
+          v-model="catalogUploadSummary"
+          type="textarea"
+          :rows="2"
+          maxlength="500"
+          show-word-limit
+          placeholder="版本说明（可选），例如：施工方案首次报审"
+          style="margin-top: 16px"
+        />
+      </template>
+      <template #footer>
+        <el-button @click="catalogUploadVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="catalogUploading"
+          :disabled="!catalogUploadFile || catalogUploadBlocked"
+          @click="doCatalogUpload"
+        >
+          {{ activeCatalogDocument ? '上传新版本' : '上传并归档' }}
         </el-button>
       </template>
     </el-dialog>
@@ -940,6 +1212,20 @@ const activity = computed(() => {
   font-weight: 700;
 }
 
+.catalog-help {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0 12px;
+  padding: 9px 12px;
+  border-radius: 5px;
+  background: #f4f8fd;
+  color: #64758a;
+  font-size: 12.5px;
+}
+.catalog-help > span:first-child {
+  flex: 1;
+}
 .catalog-groups {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -962,7 +1248,7 @@ const activity = computed(() => {
   color: #8793a5;
 }
 .catalog-items {
-  max-height: 250px;
+  max-height: 390px;
   overflow: auto;
 }
 .catalog-item {
@@ -970,22 +1256,113 @@ const activity = computed(() => {
   grid-template-columns: 56px minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
-  padding: 8px 11px;
+  padding: 9px 11px;
   border-top: 1px dashed #eef2f7;
   font-size: 12.5px;
+  transition: background 0.18s, box-shadow 0.18s;
+}
+.catalog-item.clickable {
+  cursor: pointer;
+}
+.catalog-item.clickable:hover,
+.catalog-item.clickable:focus-visible {
+  outline: none;
+  background: #f4f9ff;
+  box-shadow: inset 3px 0 0 #1e6fd9;
+}
+.catalog-item.uploaded {
+  background: #fbfefc;
 }
 .catalog-code {
   color: #1e6fd9;
   font-family: Consolas, 'Courier New', monospace;
   font-size: 11px;
 }
+.catalog-main,
+.catalog-state {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
 .catalog-name {
   color: #37465a;
   line-height: 1.45;
 }
+.catalog-name em {
+  margin-left: 6px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #fff1e6;
+  color: #b75b12;
+  font-size: 10px;
+  font-style: normal;
+}
+.catalog-formats {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #8a98a8;
+  font-size: 11px;
+}
+.catalog-state {
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.catalog-action {
+  color: #1e6fd9;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.upload-target {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px;
+  margin-bottom: 14px;
+  border: 1px solid #dce8f6;
+  border-radius: 6px;
+  background: #f5f9ff;
+}
+.upload-target-code {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: #1e6fd9;
+  color: #fff;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+}
+.upload-target b {
+  color: #26364a;
+}
+.upload-target p {
+  margin: 5px 0 0;
+  color: #708095;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.upload-desc {
+  margin-bottom: 14px;
+}
+.upload-drop-title {
+  margin-top: 8px;
+  color: #33445a;
+  font-size: 14px;
+  font-weight: 600;
+}
+.upload-drop-hint {
+  margin: 6px 0 8px;
+  color: #8b98a8;
+  font-size: 12px;
+}
 @media (max-width: 1100px) {
   .catalog-groups {
     grid-template-columns: 1fr;
+  }
+  .catalog-help {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

@@ -18,7 +18,7 @@ import type { UploadFile } from 'element-plus'
 
 import { designInputApi, dictApi, documentApi } from '@/api'
 import { explainApiError } from '@/api/http'
-import type { DictItem, DocumentInfo, DocumentVersionInfo, WorkflowTrace } from '@/api/types'
+import type { DictItem, DocumentInfo, DocumentVersionInfo, StageCode, WorkflowTrace } from '@/api/types'
 import {
   DOCUMENT_STATE_LABEL,
   DOCUMENT_STATE_TAG,
@@ -28,11 +28,20 @@ import {
   TASK_ACTION_LABEL,
 } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
+import { useProjectStore } from '@/stores/project'
 import { formatDate, formatDateTime } from '@/utils/format'
 
 const route = useRoute()
 const auth = useAuthStore()
+const projectStore = useProjectStore()
 const projectId = computed(() => route.params.id as string)
+const stageFilter = computed(() => {
+  const stage = route.query.stage
+  return typeof stage === 'string' && stage ? (stage as StageCode) : null
+})
+const activeStage = computed<StageCode>(() =>
+  stageFilter.value || projectStore.current?.current_stage_code || 'DESIGN',
+)
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -73,7 +82,10 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    docs.value = await documentApi.list(projectId.value, { with_versions: true })
+    docs.value = await documentApi.list(projectId.value, {
+      with_versions: true,
+      ...(stageFilter.value ? { stage: stageFilter.value } : {}),
+    })
   } catch (e) {
     error.value = explainApiError(e)
   } finally {
@@ -82,6 +94,9 @@ async function load() {
 }
 
 onMounted(async () => {
+  if (!projectStore.current || projectStore.current.id !== projectId.value) {
+    await projectStore.fetchDetail(projectId.value)
+  }
   await load()
   try {
     docTypes.value = await dictApi.items('DOC_TYPE')
@@ -153,7 +168,7 @@ async function doCreate() {
   try {
     await documentApi.create({
       project_id: projectId.value,
-      stage_code: 'DESIGN',
+      stage_code: activeStage.value,
       title: createForm.title,
       doc_no: createForm.doc_no || null,
       category_id: createForm.category_id,
@@ -365,6 +380,9 @@ const stateTag = (s: string) => DOCUMENT_STATE_TAG[s as keyof typeof DOCUMENT_ST
         <p class="t-grey t-sm" style="margin: 0">
           版本状态机：草稿 → 校核中 → 审核中 → 已批准 → 已发布 → 已作废。
           <b class="t-amber">未发布版本不可被下游引用。</b>
+          <span v-if="stageFilter" class="t-blue">
+            · 当前仅查看{{ STAGE_LABEL[stageFilter] }}阶段文件
+          </span>
         </p>
       </div>
       <div class="head-actions">

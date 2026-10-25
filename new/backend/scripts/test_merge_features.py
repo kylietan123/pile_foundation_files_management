@@ -44,11 +44,19 @@ def main() -> int:
     r = client.get("/api/v1/catalog/documents", headers=h)
     check("清单接口返回 200", r.status_code == 200, r.text[:200])
     rows = r.json().get("data") or []
-    check("共 84 类文档", len(rows) == 84, str(len(rows)))
-    check("施工阶段 32 类", sum(1 for x in rows if x.get("stage_code") == "CONSTRUCTION") == 32)
+    check("共 88 项文档", len(rows) == 88, str(len(rows)))
+    construction_rows = [x for x in rows if x.get("stage_code") == "CONSTRUCTION"]
+    check("施工阶段 36 项", len(construction_rows) == 36, str(len(construction_rows)))
+    check("施工总承包单位 10 项", sum(
+        1 for x in construction_rows if x.get("doc_code", "").startswith("5.1.")
+    ) == 10)
+    check("施工首项已同步", (
+        construction_rows[0].get("doc_name") == "桩基施工组织设计 / 桩基专项施工方案"
+        if construction_rows else False
+    ))
 
     r = client.get("/api/v1/catalog/documents?stage=CONSTRUCTION", headers=h)
-    check("按阶段过滤生效", len(r.json().get("data") or []) == 32)
+    check("按阶段过滤生效", len(r.json().get("data") or []) == 36)
 
     print("\n[2] 项目创建权限与建设单位审核")
     r = client.post("/api/v1/auth/login", json={"username": "admin", "password": PASSWORD})
@@ -84,6 +92,15 @@ def main() -> int:
         "/api/v1/auth/login",
         json={"username": "owner_staff_test", "password": "Staff@123"},
     )
+    staff_h = {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
+    r = client.get("/api/v1/projects", headers=staff_h)
+    check("新员工首次登录未改密时不能进入业务页面", r.status_code == 403, r.text[:300])
+    r = client.post(
+        "/api/v1/auth/change-password",
+        headers=staff_h,
+        json={"old_password": "Staff@123", "new_password": "Staff@456"},
+    )
+    check("新员工首次修改密码成功", r.status_code == 200, r.text[:300])
     staff_h = {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
     r = client.post(
         "/api/v1/projects",

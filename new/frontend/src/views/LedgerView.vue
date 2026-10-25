@@ -41,7 +41,9 @@ const ledger = ref<Ledger | null>(null)
 const board = ref<StageResponsibility[]>([])
 
 /** 筛选 */
-const stageFilter = ref<string | null>(null)
+const stageFilter = ref<string | null>(
+  typeof route.query.stage === 'string' ? route.query.stage : null,
+)
 const onlyMine = ref(false)
 
 /** 详情抽屉 */

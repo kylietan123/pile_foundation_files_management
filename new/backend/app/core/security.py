@@ -141,9 +141,20 @@ def decode_token(token: str) -> dict[str, Any]:
     return payload
 
 
-def create_access_token(user_id: str, extra: dict[str, Any] | None = None) -> str:
-    return create_token(user_id, "access", extra_claims=extra)
+def create_access_token(
+    user_id: str,
+    token_version: int = 0,
+    extra: dict[str, Any] | None = None,
+) -> str:
+    claims: dict[str, Any] = {"ver": int(token_version or 0)}
+    if extra:
+        claims.update(extra)
+    return create_token(user_id, "access", extra_claims=claims)
 
 
-def create_refresh_token(user_id: str) -> str:
-    return create_token(user_id, "refresh")
+def create_refresh_token(user_id: str, token_version: int = 0) -> str:
+    return create_token(
+        user_id,
+        "refresh",
+        extra_claims={"ver": int(token_version or 0)},
+    )
