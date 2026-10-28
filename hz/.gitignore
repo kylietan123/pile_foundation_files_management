@@ -1,0 +1,20 @@
+node_modules/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.db
+*.db-*
+backend/storage/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Local configuration
+.env
+.DS_Store
+
+# 运行时数据（storage 实际位置）
+*.log

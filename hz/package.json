@@ -1,0 +1,16 @@
+{
+  "name": "pile-foundation-merged-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "桩基工程全过程管理文档平台合并版",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm --workspace frontend run dev",
+    "build": "npm --workspace frontend run build",
+    "build:only": "npm --workspace frontend run build:only",
+    "preview": "npm --workspace frontend run preview",
+    "typecheck": "npm --workspace frontend run typecheck"
+  }
+}

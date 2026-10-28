@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>数据库结构与权限设计 —— 汇报图</title>
+<style>
+  /* 与已有汇报材料同一套视觉：设计院深蓝 + 青绿 */
+  :root{
+    --ink:#16202c; --ink2:#33475c; --grey:#71808f; --line:#e2e8f0;
+    --blue:#1e6fd9; --blue-soft:#eaf2fd; --navy:#12294a;
+    --teal:#0f9b8e; --teal-soft:#e8f7f5;
+    --amber:#c8860d; --amber-soft:#fff8e8;
+    --red:#c0392b; --red-soft:#fdecea;
+    --purple:#6b4bc9; --purple-soft:#f1edfd;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:#f4f6fa; color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{width:1680px; margin:0 auto; padding:34px 40px 46px;}
+
+  .doc-h{display:flex; align-items:flex-end; gap:16px; margin-bottom:8px;}
+  .doc-h h1{font-size:27px; margin:0; letter-spacing:-.3px;}
+  .doc-h .sub{font-size:13px; color:var(--grey); padding-bottom:4px;}
+  .doc-note{
+    font-size:13px; color:var(--ink2); line-height:1.85; margin-bottom:10px;
+    border-left:3px solid var(--blue); padding-left:13px;
+  }
+  .doc-note b{color:var(--blue)}
+  .pivot{
+    background:var(--amber-soft); border:1px solid #ecd9ae; border-radius:7px;
+    padding:11px 15px; font-size:12.5px; color:#7a5408; line-height:1.8;
+    margin-bottom:24px;
+  }
+  .pivot b{color:#6b4906}
+
+  .sec{font-size:19px; font-weight:700; margin:34px 0 6px; display:flex; align-items:center; gap:10px;}
+  .sec:first-of-type{margin-top:8px}
+  .sec .bar{width:4px; height:19px; background:var(--blue); border-radius:2px;}
+  .sec .cnt{font-size:12.5px; font-weight:400; color:var(--grey); margin-left:auto;}
+  .sec-d{font-size:13px; color:var(--grey); margin:0 0 16px 14px; line-height:1.7;}
+  .sec-d code{font-family:Consolas,monospace; font-size:12px; color:var(--blue);
+              background:var(--blue-soft); border-radius:3px; padding:1px 5px;}
+
+  .card{background:#fff; border:1px solid var(--line); border-radius:8px;}
+
+  /* ---------------- 核心枢纽 ---------------- */
+  .hubs{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;}
+  .hub{padding:14px 16px; border-radius:8px; background:#fff; border:1px solid var(--line); position:relative; overflow:hidden;}
+  .hub::before{content:''; position:absolute; left:0; top:0; bottom:0; width:4px;}
+  .hub.c1::before{background:var(--blue)}
+  .hub.c2::before{background:var(--teal)}
+  .hub.c3::before{background:var(--amber)}
+  .hub.c4::before{background:var(--purple)}
+  .hub .hn{font-size:14.5px; font-weight:700; font-family:Consolas,monospace;}
+  .hub .hl{font-size:12.5px; color:var(--ink2); margin-top:3px;}
+  .hub .hr{font-size:11.5px; color:var(--grey); margin-top:7px; padding-top:7px; border-top:1px dashed var(--line);}
+
+  /* ---------------- 域卡片 ---------------- */
+  .domains{display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start;}
+  .dom{padding:0; overflow:hidden;}
+  .dom-h{padding:11px 16px; display:flex; align-items:center; gap:9px;
+         background:#f8fafc; border-bottom:1px solid var(--line);}
+  .dom-h .dn{font-size:14.5px; font-weight:700;}
+  .dom-h .dc{font-size:11.5px; color:var(--grey); margin-left:auto;
+             background:#fff; border:1px solid var(--line); border-radius:10px; padding:1px 9px;}
+  .dom-h .dt{width:3px; height:15px; border-radius:2px; background:var(--blue);}
+  table{width:100%; border-collapse:collapse;}
+  th{font-size:11.5px; color:var(--grey); font-weight:600; text-align:left;
+     padding:7px 16px; border-bottom:1px solid var(--line); background:#fcfdfe;}
+  td{font-size:12.5px; padding:7px 16px; border-bottom:1px solid #f2f5f9; vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  td.tn{font-family:Consolas,monospace; font-size:12.5px; color:var(--ink); font-weight:600; white-space:nowrap;}
+  td.tp{color:var(--ink2); line-height:1.55;}
+  .fk{font-size:11px; color:var(--purple); background:var(--purple-soft);
+      border-radius:3px; padding:1px 5px; margin-left:5px; font-family:Consolas,monospace;}
+  .star{color:var(--amber); font-weight:700;}
+  .rows{font-size:11px; color:var(--grey); font-family:Consolas,monospace;}
+  .removed{opacity:.62;}
+
+  /* ---------------- 权限：三层 ---------------- */
+  .layers{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:18px;}
+  .layer{padding:16px 18px; position:relative;}
+  .layer .lno{font-size:11.5px; color:#fff; background:var(--navy); border-radius:10px;
+              padding:1px 9px; display:inline-block; margin-bottom:9px;}
+  .layer h3{font-size:15.5px; margin:0 0 7px;}
+  .layer p{font-size:12.5px; color:var(--ink2); line-height:1.75; margin:0;}
+  .layer .code{font-family:Consolas,monospace; font-size:12px; color:var(--blue);
+               background:var(--blue-soft); border-radius:3px; padding:1px 5px;}
+
+  /* ---------------- 权限：五要素 ---------------- */
+  .five{display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:18px;}
+  .fm{padding:12px 14px;}
+  .fm .fk2{font-family:Consolas,monospace; font-size:12.5px; font-weight:700; color:var(--ink);}
+  .fm .fl{font-size:12.5px; color:var(--ink2); margin-top:2px;}
+  .fm .fd{font-size:11.5px; color:var(--grey); margin-top:6px; line-height:1.6;}
+
+  /* ---------------- 推导链 ---------------- */
+  .chain{display:grid; grid-template-columns:1fr auto 1fr auto 1fr; gap:10px;
+         align-items:center; margin-bottom:18px;}
+  .ch{padding:14px 16px; border-radius:8px; background:#fff; border:1px solid var(--line);}
+  .ch .ct{font-size:13.5px; font-weight:700; margin-bottom:6px;}
+  .ch .cd{font-size:12px; color:var(--ink2); line-height:1.7;}
+  .ch .cd code{font-family:Consolas,monospace; font-size:11.5px;
+               background:#f4f6fa; border-radius:3px; padding:1px 4px;}
+  .ch.hl{background:var(--blue-soft); border-color:#c3dbfa;}
+  .arrow{font-size:20px; color:var(--grey); text-align:center;}
+
+  /* ---------------- 矩阵 ---------------- */
+  .matrix-wrap{padding:0; overflow:hidden;}
+  .matrix{width:100%; border-collapse:collapse;}
+  .matrix th{padding:9px 6px; text-align:center; font-size:12px; background:#f8fafc;}
+  .matrix th.role{text-align:left; padding-left:16px; width:150px;}
+  .matrix th.dot{width:30px;}
+  .matrix td{padding:7px 6px; text-align:center; border-bottom:1px solid #f2f5f9;}
+  .matrix td.role{text-align:left; padding-left:16px; border-right:1px solid var(--line);}
+  .matrix tr:last-child td{border-bottom:none;}
+  .matrix tr:hover td{background:#fbfcfe;}
+  .rn{font-size:12.5px; font-weight:700;}
+  .rc{font-family:Consolas,monospace; font-size:10px; color:var(--grey); margin-left:5px;}
+  .own{color:#fff; background:var(--red); width:19px; height:19px; line-height:19px;
+       border-radius:50%; display:inline-block; font-size:10.5px; font-weight:700;}
+  .rel{color:#fff; background:var(--amber); width:19px; height:19px; line-height:19px;
+       border-radius:50%; display:inline-block; font-size:10.5px; font-weight:700;}
+  .par{color:var(--grey); background:#eef2f7; width:19px; height:19px; line-height:19px;
+       border-radius:50%; display:inline-block; font-size:10.5px; font-weight:700;}
+  .ver{color:#fff; background:var(--purple); width:19px; height:19px; line-height:19px;
+       border-radius:50%; display:inline-block; font-size:10.5px; font-weight:700;}
+  .n{color:#cdd6e0; font-size:15px;}
+  .legend{padding:10px 16px; font-size:11.5px; color:var(--grey);
+          border-top:1px solid var(--line); background:#fcfdfe; line-height:1.7;}
+  .legend b{color:var(--ink2)}
+
+  /* ---------------- 规则卡 ---------------- */
+  .rules3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:18px;}
+  .r3{padding:16px 18px;}
+  .r3 h3{font-size:14.5px; margin:0 0 8px; display:flex; align-items:center; gap:7px;}
+  .r3 h3 .n2{width:20px;height:20px;border-radius:50%;background:var(--navy);color:#fff;
+             font-size:11.5px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .r3 p{font-size:12.5px; color:var(--ink2); line-height:1.8; margin:0 0 8px;}
+  .r3 p:last-child{margin-bottom:0;}
+  .r3 code{font-family:Consolas,monospace; font-size:11.5px; background:#f4f6fa;
+           border-radius:3px; padding:1px 5px; color:var(--ink);}
+  .warnbox{background:var(--red-soft); border:1px solid #f3c9c4; border-radius:6px;
+           padding:11px 13px; font-size:12.5px; color:#8a2f26; line-height:1.8; margin-top:9px;}
+
+  /* ---------------- 密级 ---------------- */
+  .secret{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px;}
+  .sl{padding:12px 15px; border-radius:7px; border:1px solid var(--line); background:#fff;}
+  .sl .sn{font-size:13.5px; font-weight:700;}
+  .sl .sv{font-size:11.5px; color:var(--grey); margin-top:2px;}
+  .sl .sw{font-size:12px; color:var(--ink2); margin-top:7px; line-height:1.6;}
+  .sl.s0{border-left:4px solid #94a3b8}
+  .sl.s1{border-left:4px solid var(--blue)}
+  .sl.s2{border-left:4px solid var(--amber)}
+  .sl.s3{border-left:4px solid var(--red)}
+
+  /* ---------------- 追溯条 ---------------- */
+  .trace{background:#fff; border:1px solid var(--line); border-radius:8px;
+         margin-bottom:18px; overflow:hidden;}
+  .trace-h{padding:12px 18px; background:#f8fafc; border-bottom:1px solid var(--line);
+           font-size:14.5px; font-weight:700; display:flex; align-items:center; gap:9px;}
+  .trace-bar{width:3px; height:15px; border-radius:2px; background:var(--blue);}
+  .trace-body{padding:15px 18px;}
+  .tline{display:flex; align-items:flex-start; gap:0; margin-bottom:4px;}
+  .tnode{flex:1; position:relative; padding:0 8px;}
+  .tnode::before{content:''; position:absolute; left:16px; right:-50%; top:9px;
+                 height:2px; background:var(--line);}
+  .tnode:last-child::before{display:none;}
+  .tdot{width:20px; height:20px; border-radius:50%; background:var(--blue); color:#fff;
+        font-size:11px; font-weight:700; display:flex; align-items:center;
+        justify-content:center; position:relative; z-index:1; margin-bottom:8px;}
+  .tdot.g{background:var(--teal)}
+  .tdot.a{background:var(--amber)}
+  .tt{font-size:13px; font-weight:700; margin-bottom:3px;}
+  .td{font-size:11.5px; color:var(--ink2); line-height:1.65;}
+  .tcode{font-family:Consolas,monospace; font-size:10.5px; color:var(--grey);}
+
+  .foot{margin-top:26px; padding-top:14px; border-top:1px solid var(--line);
+        font-size:11.5px; color:var(--grey); display:flex; justify-content:space-between;}
+  .foot code{font-family:Consolas,monospace;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="doc-h">
+    <h1>数据库结构与权限设计</h1>
+    <div class="sub">桩基工程全生命周期管理平台 PILE·LCM · 以参与单位为主体的文档管理</div>
+  </div>
+  <div class="doc-note">
+    平台核心是<b>文档管理</b> —— 解决工程周期长、文件易丢、参与方多、责任难追的问题。<br>
+    <b>不做</b>设计计算与出图（现有软件已成熟）；主体是<b>参与单位</b>，不是"设计人/校核人"这类岗位。
+  </div>
+  <div class="pivot">
+    <b>本次方向调整（相比上一版汇报）</b>：① 权限主体由「13 个岗位角色」改为
+    <b>「11 个参与单位 × 阶段 × 责任等级」</b>，权限从《管理流程》矩阵自动推导；
+    ② 校审由「三级（校核/审核/批准）」简化为<b>「两级（主办确认 → 相关复核）」</b>；
+    ③ 移除成本、进度、监测共 <b>12 张表</b>（0 行、无代码引用），表数 37 → <b>29</b>；
+    ④ 新增<b>文件台账与追溯</b>、<b>我的工作（跨项目交办事项）</b>两个能力。
+  </div>
+
+  <!-- ==================== 一、数据库结构 ==================== -->
+  <section data-sec="db">
+  <div class="sec"><span class="bar"></span>数据库结构<span class="cnt">34 张业务表 / 8 个业务域</span></div>
+  <p class="sec-d">全表围绕 <b>4 个枢纽实体</b>展开；除枢纽外，每张表都能由 <code>project_id</code> 归集到项目上。</p>
+
+  <div class="hubs">
+    <div class="hub c1">
+      <div class="hn">project</div>
+      <div class="hl">项目·工程主表</div>
+      <div class="hr"><b>10</b> 张表直接外键引用<br>另有 <b>20</b> 张表带 project_id</div>
+    </div>
+    <div class="hub c2">
+      <div class="hn">app_user</div>
+      <div class="hl">用户·人员主表</div>
+      <div class="hr"><b>18</b> 张表引用它（28 个外键列）<br><b>记录"谁做的"</b></div>
+    </div>
+    <div class="hub c3">
+      <div class="hn">dict_item</div>
+      <div class="hl">数据字典·统一 ID</div>
+      <div class="hr"><b>3</b> 张表引用它<br>各阶段共用同一套分类</div>
+    </div>
+    <div class="hub c4">
+      <div class="hn">document_version</div>
+      <div class="hl">文件版本·成果载体</div>
+      <div class="hr"><b>3</b> 张表引用它（4 个外键列）<br>版本状态机四条铁律的约束对象</div>
+    </div>
+  </div>
+
+  <div class="domains">
+
+    <!-- 组织与项目 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt"></span><span class="dn">组织与项目</span><span class="dc">7 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">organization</td><td class="tp">参建单位（业主 / 勘察 / 设计 / 施工 / 监理 / 审查 …）</td><td class="rows">10</td></tr>
+        <tr><td class="tn">app_user</td><td class="tp">人员账号<span class="star">★</span></td><td class="rows">12</td></tr>
+        <tr><td class="tn">user_org</td><td class="tp">人员与单位的多对多关系</td><td class="rows">12</td></tr>
+        <tr><td class="tn">project</td><td class="tp">工程项目主表<span class="star">★</span></td><td class="rows">4</td></tr>
+        <tr><td class="tn">project_member</td><td class="tp"><b>权限核心表</b>：项目 + 单位 + 责任<span class="star">★</span></td><td class="rows">24</td></tr>
+        <tr><td class="tn">project_stage</td><td class="tp">七阶段推进状态与主办单位</td><td class="rows">28</td></tr>
+        <tr><td class="tn">pile</td><td class="tp">桩位台账（分区、桩型、桩长、是否已施工）</td><td class="rows">96</td></tr>
+      </table>
+      <div class="legend">
+        <code>project_member</code> 的 <code>role_code</code> 字段现在存的是
+        <b>参与单位代码</b>（如 <code>DESIGNER</code> = 设计单位）。
+        字段名沿用是为了兼容迁移，语义已从"岗位"变为"单位"。
+      </div>
+    </div>
+
+    <!-- 字典 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt" style="background:var(--purple)"></span><span class="dn">数据字典（统一 ID）</span><span class="dc">2 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">dict_category</td><td class="tp">字典分类（文件类型 / 桩型 / 问题类型 …）</td><td class="rows">11</td></tr>
+        <tr><td class="tn">dict_item</td><td class="tp">字典项；<b>可自嵌套</b>（parent_id）<span class="star">★</span></td><td class="rows">65</td></tr>
+      </table>
+      <div class="legend">
+        <b>统一 ID 原则</b>：成果类型、桩型、问题分类等公共选项一律用
+        <code>dict_item.id</code> 外键引用，各阶段不各存一套字符串 ——
+        这样各方的数据才能汇总对比。
+      </div>
+    </div>
+
+    <!-- 文件 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt" style="background:var(--amber)"></span><span class="dn">文件与版本</span><span class="dc">5 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">file_object</td><td class="tp">物理文件，<b>内容寻址</b>（sha256 去重）<span class="star">★</span></td><td class="rows">7</td></tr>
+        <tr><td class="tn">document</td><td class="tp">文件台账，指向当前有效版本</td><td class="rows">5</td></tr>
+        <tr><td class="tn">document_version</td><td class="tp">版本；<b>状态机四条铁律</b>在此约束<span class="star">★</span></td><td class="rows">7</td></tr>
+        <tr><td class="tn">document_relation</td><td class="tp">版本关系（替代 / 引用）</td><td class="rows">1</td></tr>
+        <tr><td class="tn">document_access</td><td class="tp">单独授权（例外情况）</td><td class="rows">0</td></tr>
+      </table>
+      <div class="legend">
+        版本状态：草稿 → 校核中 → 审核中 → 已批准 → <b>已发布</b> → 已作废。<br>
+        四条铁律由服务端强制：非发布版本不可被下游引用、一个文件同时只有一个在途版本、
+        已发布不可逆、最多一个有效版本且作废需理由不物理删除。
+      </div>
+    </div>
+
+    <!-- 流程 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt" style="background:var(--teal)"></span><span class="dn">流程与审批</span><span class="dc">3 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">workflow_template</td><td class="tp">流程模板（<b>两级签认</b>、变更审批）</td><td class="rows">2</td></tr>
+        <tr><td class="tn">workflow_instance</td><td class="tp">流程实例，绑定具体业务对象；带<b>轮次</b></td><td class="rows">4</td></tr>
+        <tr><td class="tn">workflow_task</td><td class="tp">节点任务；<b>按单位派发</b>，记录签认意见与操作人</td><td class="rows">7</td></tr>
+      </table>
+      <div class="legend">
+        一套流程引擎同时服务文件签认、变更审批 —— <b>各阶段不另写审批逻辑</b>。<br>
+        模板里的节点用 <code>{PRIMARY}</code> / <code>{RELATED}</code> 占位，
+        运行时按当阶段责任矩阵解析成具体单位，<b>换阶段不用改模板</b>。
+      </div>
+    </div>
+
+    <!-- 设计输入与勘察 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt"></span><span class="dn">设计输入与勘察数据</span><span class="dc">3 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">soil_layer</td><td class="tp">土层，按项目 + 层号组织</td><td class="rows">6</td></tr>
+        <tr><td class="tn">soil_property</td><td class="tp">土工试验指标；<b>来源可回溯到报告页码</b></td><td class="rows">28</td></tr>
+        <tr><td class="tn">design_param</td><td class="tp"><b>设计参数 + 溯源链</b>：来源版本 + 核验状态<span class="star">★</span></td><td class="rows">19</td></tr>
+      </table>
+      <div class="legend">
+        <code>design_param</code> 记录「来源文件版本 + 页码表号 + 核验状态」。
+        来源文件发布新版本时，引用它的参数<b>自动置为「来源已失效」</b>，
+        交付检查会因此拦下 —— 防止用了过期的勘察数据。
+      </div>
+    </div>
+
+    <!-- 变更与问题 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt" style="background:var(--red)"></span><span class="dn">变更与问题</span><span class="dc">4 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">change_request</td><td class="tp">设计变更；含影响范围（分区 / 桩数 / 已施工数）</td><td class="rows">3</td></tr>
+        <tr><td class="tn">change_impact</td><td class="tp">影响明细，<b>逐项处理</b>；未处理完不允许关闭</td><td class="rows">12</td></tr>
+        <tr><td class="tn">issue</td><td class="tp">问题；八段式链路进度 + 知识沉淀标记</td><td class="rows">3</td></tr>
+        <tr><td class="tn">issue_action</td><td class="tp">处理记录，按环节顺序不允许跳步</td><td class="rows">16</td></tr>
+      </table>
+      <div class="legend">
+        变更影响分 6 类，其中「<b>已施工部位受影响</b>」判为高风险 ——
+        批了没改、或改到已施工的桩，是最常见的责任风险。
+      </div>
+    </div>
+
+    <!-- AI 与审计 -->
+    <div class="card dom">
+      <div class="dom-h"><span class="dt" style="background:var(--purple)"></span><span class="dn">AI 与审计</span><span class="dc">5 张</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>用途</th><th style="width:52px">演示</th></tr>
+        <tr><td class="tn">knowledge_chunk</td><td class="tp">知识切片；<b>只收已发布版本</b>，带章节与页码</td><td class="rows">0</td></tr>
+        <tr><td class="tn">ai_conversation</td><td class="tp">会话；<b>强制绑定项目</b>，不允许跨项目</td><td class="rows">0</td></tr>
+        <tr><td class="tn">ai_message</td><td class="tp">问答消息；四段式字段 + <b>有无引用</b></td><td class="rows">0</td></tr>
+        <tr><td class="tn">ai_citation</td><td class="tp">引用溯源：指向切片与源版本</td><td class="rows">0</td></tr>
+        <tr><td class="tn">audit_log</td><td class="tp">全量操作留痕（<b>谁在何时做了什么</b>）</td><td class="rows">0</td></tr>
+      </table>
+      <div class="legend">
+        <code>ai_message.has_citation</code>=false 时前端不展示 ——
+        没有引用的 AI 回答不允许给用户看，这是防幻觉的机制。
+      </div>
+    </div>
+
+    <!-- 已移除 -->
+    <div class="card dom removed">
+      <div class="dom-h"><span class="dt" style="background:#94a3b8"></span><span class="dn">已移除（12 张）</span><span class="dc">方向调整</span></div>
+      <table>
+        <tr><th style="width:33%">表名</th><th>原用途</th><th style="width:64px">现状</th></tr>
+        <tr><td class="tn">cost_item · cost_actual</td><td class="tp">成本项与发生额</td><td class="rows">已删</td></tr>
+        <tr><td class="tn">schedule_task · progress_report</td><td class="tp">计划任务与进度填报</td><td class="rows">已删</td></tr>
+        <tr><td class="tn">monitor_point · monitor_reading</td><td class="tp">监测点与读数</td><td class="rows">已删</td></tr>
+        <tr><td class="tn">monitor_threshold · monitor_alarm</td><td class="tp">预警阈值与报警</td><td class="rows">已删</td></tr>
+      </table>
+      <div class="legend">
+        这 12 张表移除前均为 <b>0 行、无任何业务代码引用</b>。<br>
+        平台不做成本与进度管理；监测结果以<b>文件</b>形式归档，
+        不需要结构化点位表。因尚未正式部署，直接<b>重写基线迁移</b>而非叠加 drop 迁移。
+      </div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ==================== 二、权限设计 ==================== -->
+  <section data-sec="perm">
+  <div class="sec"><span class="bar"></span>权限设计<span class="cnt">单位 × 阶段 × 责任等级 · 由矩阵推导</span></div>
+  <p class="sec-d">
+    权限<b>不是逐个配的，而是从《管理流程》责任矩阵推导出来的</b> ——
+    矩阵改了权限自动跟着变，不会出现"矩阵说监理负责、代码却拦住监理"。
+  </p>
+
+  <div class="chain">
+    <div class="card ch hl">
+      <div class="ct">① 《管理流程》矩阵</div>
+      <div class="cd">
+        7 个阶段 × 11 个参与单位，标出每格的责任等级。<br>
+        <code>RESPONSIBILITY_MATRIX[阶段][单位]</code>
+      </div>
+    </div>
+    <div class="arrow">➜</div>
+    <div class="card ch hl">
+      <div class="ct">② 责任等级</div>
+      <div class="cd">
+        <b>主办（✓**）</b> 主要责任<br>
+        <b>相关（✓*）</b> 次要责任<br>
+        <b>参与（✓）</b> 一般参与<br>
+        <b>审查</b> 政府单位专用
+      </div>
+    </div>
+    <div class="arrow">➜</div>
+    <div class="card ch hl">
+      <div class="ct">③ 可用动作</div>
+      <div class="cd">
+        主办 → 查看 下载 <b>编辑 提交 发布 签认</b><br>
+        相关 → 查看 下载 <b>签认</b> 提意见<br>
+        参与 → 查看 下载<br>
+        审查 → 查看 下载 提意见
+      </div>
+    </div>
+  </div>
+
+  <div class="layers">
+    <div class="card layer">
+      <div class="lno">第 1 层</div>
+      <h3>参与单位 —— 你是不是本项目的参与方</h3>
+      <p>
+        项目列表与文件列表全部走 <span class="code">scoped_project_query()</span>，
+        <b>过滤发生在 SQL 层</b>。<br>
+        非参与单位连项目都看不到，更不会进内存。
+      </p>
+    </div>
+    <div class="card layer">
+      <div class="lno">第 2 层</div>
+      <h3>阶段责任 —— 这个阶段你有没有责任</h3>
+      <p>
+        阶段范围也从矩阵推导：<b>矩阵里写了哪些阶段，就自动有哪些阶段的权限</b>，
+        不需要另配 <span class="code">stage_scope</span>。<br>
+        例：设计单位在设计阶段是主办，在勘察阶段是参与（只能查阅输入资料）。
+      </p>
+    </div>
+    <div class="card layer">
+      <div class="lno">第 3 层</div>
+      <h3>动作 —— 你的责任等级允许做吗</h3>
+      <p>
+        <span class="code">can(动作, 项目, 阶段)</span>：先取该单位在此阶段的责任等级，
+        再查该等级允许的动作集。<br>
+        <b>单位内不区分岗位</b> —— 单位里任何人都能上传，
+        责任靠"每次操作都记姓名与工号"来落实。
+      </p>
+    </div>
+  </div>
+
+  <div class="sec" style="font-size:15.5px; margin-top:26px"><span class="bar" style="height:15px"></span>一条成员关系的五个要素</div>
+  <p class="sec-d" style="margin-top:2px">
+    权限不直接配在人身上，而是配在 <code>project_member</code> 这一行上。
+    额外带<b>生效期</b>，支持人员借调与临时参与。
+  </p>
+
+  <div class="five">
+    <div class="card fm">
+      <div class="fk2">project_id</div>
+      <div class="fl">哪个项目</div>
+      <div class="fd">同一单位在不同项目可不同责任</div>
+    </div>
+    <div class="card fm">
+      <div class="fk2">user_id</div>
+      <div class="fl">哪个人</div>
+      <div class="fd">一个人可参与多个项目</div>
+    </div>
+    <div class="card fm">
+      <div class="fk2">role_code</div>
+      <div class="fl">哪个参与单位</div>
+      <div class="fd">11 个单位之一（字段名沿用旧名）</div>
+    </div>
+    <div class="card fm">
+      <div class="fk2">data_scope</div>
+      <div class="fl">数据范围</div>
+      <div class="fd">ORG_ONLY 时叠加单位约束</div>
+    </div>
+    <div class="card fm">
+      <div class="fk2">stage_scope</div>
+      <div class="fl">阶段覆盖（可选）</div>
+      <div class="fd">留空＝按责任矩阵推导，项目级例外才填</div>
+    </div>
+  </div>
+
+  <div class="sec" style="font-size:15.5px; margin-top:6px"><span class="bar" style="height:15px"></span>参与单位 × 阶段 责任矩阵</div>
+  <p class="sec-d" style="margin-top:2px">
+    这张表就是代码里的 <code>RESPONSIBILITY_MATRIX</code>，不是文档约定。
+    <b>主办</b> 可上传与发布，<b>相关</b> 可浏览与签认，<b>参与</b> 仅查看。
+  </p>
+
+  <div class="card matrix-wrap">
+    <table class="matrix">
+      <tr>
+        <th class="role">参与单位</th>
+        <th class="dot">前期<br>调研</th>
+        <th class="dot">勘察</th>
+        <th class="dot">设计<br>试桩</th>
+        <th class="dot">设计</th>
+        <th class="dot">桩基<br>施工</th>
+        <th class="dot">验收<br>试桩</th>
+        <th class="dot">运维<br>监测</th>
+        <th style="text-align:left; padding-left:18px">说明</th>
+      </tr>
+      <tr><td class="role"><span class="rn">建设单位</span><span class="rc">OWNER</span></td>
+        <td><span class="own">主</span></td><td><span class="par">参</span></td><td><span class="par">参</span></td>
+        <td><span class="par">参</span></td><td><span class="par">参</span></td><td><span class="par">参</span></td>
+        <td><span class="rel">相</span></td>
+        <td class="stg" style="text-align:left">项目业主，前期调研牵头</td></tr>
+      <tr><td class="role"><span class="rn">勘察单位</span><span class="rc">SURVEYOR</span></td>
+        <td><span class="par">参</span></td><td><span class="own">主</span></td><td><span class="par">参</span></td>
+        <td><span class="par">参</span></td><td><span class="par">参</span></td><td><span class="par">参</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left">勘察报告提供方</td></tr>
+      <tr><td class="role"><span class="rn">设计试桩单位</span><span class="rc">DESIGN_TEST_PILE</span></td>
+        <td><span class="n">–</span></td><td><span class="par">参</span></td><td><span class="own">主</span></td>
+        <td><span class="rel">相</span></td><td><span class="par">参</span></td><td><span class="par">参</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left">试验桩设计与实施</td></tr>
+      <tr><td class="role"><span class="rn">设计单位</span><span class="rc">DESIGNER</span></td>
+        <td><span class="n">–</span></td><td><span class="par">参</span></td><td><span class="rel">相</span></td>
+        <td><span class="own">主</span></td><td><span class="par">参</span></td><td><span class="rel">相</span></td>
+        <td><span class="par">参</span></td>
+        <td class="stg" style="text-align:left">项目参与方；<b>勘察阶段为经确认补入</b>（见下「注」）</td></tr>
+      <tr><td class="role"><span class="rn">总包单位</span><span class="rc">GENERAL_CONTRACTOR</span></td>
+        <td><span class="n">–</span></td><td><span class="n">–</span></td><td><span class="par">参</span></td>
+        <td><span class="par">参</span></td><td><span class="own">主</span></td><td><span class="par">参</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left">桩基施工主体</td></tr>
+      <tr><td class="role"><span class="rn">分包单位</span><span class="rc">SUBCONTRACTOR</span></td>
+        <td><span class="n">–</span></td><td><span class="n">–</span></td><td><span class="n">–</span></td>
+        <td><span class="par">参</span></td><td><span class="rel">相</span></td><td><span class="rel">相</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left">接受总包管理与监理检查</td></tr>
+      <tr><td class="role"><span class="rn">监理单位</span><span class="rc">SUPERVISOR</span></td>
+        <td><span class="n">–</span></td><td><span class="par">参</span></td><td><span class="par">参</span></td>
+        <td><span class="rel">相</span></td><td><span class="rel">相</span></td><td><span class="par">参</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left">不编辑文件，但需签认复核意见</td></tr>
+      <tr><td class="role"><span class="rn">验收试桩单位</span><span class="rc">ACCEPT_TEST_PILE</span></td>
+        <td><span class="n">–</span></td><td><span class="n">–</span></td><td><span class="n">–</span></td>
+        <td><span class="n">–</span></td><td><span class="n">–</span></td><td><span class="own">主</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left">验收检测与报告</td></tr>
+      <tr><td class="role"><span class="rn">检测监测单位</span><span class="rc">INSPECTOR</span></td>
+        <td><span class="n">–</span></td><td><span class="n">–</span></td><td><span class="par">参</span></td>
+        <td><span class="par">参</span></td><td><span class="par">参</span></td><td><span class="par">参</span></td>
+        <td><span class="own">主</span></td>
+        <td class="stg" style="text-align:left">运维期监测，结果以文件归档</td></tr>
+      <tr><td class="role"><span class="rn">政府审查单位</span><span class="rc">GOVERNMENT</span></td>
+        <td><span class="rel">相</span></td><td><span class="par">参</span></td><td><span class="rel">相</span></td>
+        <td><span class="rel">相</span></td><td><span class="rel">相</span></td><td><span class="n">–</span></td>
+        <td><span class="n">–</span></td>
+        <td class="stg" style="text-align:left"><b>只有审查权限</b>：只读 + 提审查意见</td></tr>
+      <tr><td class="role"><span class="rn">系统管理员</span><span class="rc">ADMIN</span></td>
+        <td><span class="ver">管</span></td><td><span class="ver">管</span></td><td><span class="ver">管</span></td>
+        <td><span class="ver">管</span></td><td><span class="ver">管</span></td><td><span class="ver">管</span></td>
+        <td><span class="ver">管</span></td>
+        <td class="stg" style="text-align:left">平台角色，非项目参与方</td></tr>
+    </table>
+    <div class="legend">
+      <span class="own">主</span> 主办（主要责任）：可上传、提交、发布、签认 &nbsp;·&nbsp;
+      <span class="rel">相</span> 相关（次要责任）：可查看、下载、签认、提意见 &nbsp;·&nbsp;
+      <span class="par">参</span> 参与：仅查看与下载 &nbsp;·&nbsp;
+      <span class="ver">管</span> 系统管理员（唯一超管）<br>
+      <b>注</b>：原矩阵在「勘察阶段 × 设计单位」这一格未打 √。
+      但设计必须参照勘察资料 —— 不补这一格，设计人员在系统里看不到勘察报告。
+      <b>2026-10-13 经确认补入，定为「参与」（只读），不承担勘察阶段责任</b>；
+      该阶段主办单位仍是勘察单位，设计单位不能上传、编辑或签认勘察文件。
+      这正是 <b>√（参与）与 √*（相关）的区别：参与 ≠ 责任</b>。<br>
+      <b>注意监理与政府审查没有编辑权限</b> —— 这是刻意的：能改文件的人不该同时是签字复核的人。
+      但<b>签认不需要编辑权限</b>：只要你是该节点被指派的处理人就能签，
+      这是"签认"与"编辑"两件事在权限上的区别。
+    </div>
+  </div>
+  </section>
+
+  <!-- ==================== 三、两条核心机制 ==================== -->
+  <section data-sec="rules">
+  <div class="sec" style="font-size:15.5px; margin-top:26px"><span class="bar" style="height:15px"></span>两条核心机制</div>
+
+  <div class="rules3">
+    <div class="card r3">
+      <h3><span class="n2">1</span>两级签认：主办确认 → 相关复核</h3>
+      <p>
+        模板节点用 <code>{PRIMARY}</code> 与 <code>{RELATED}</code> 占位，
+        运行时按<b>当阶段责任矩阵</b>解析成具体单位。
+        换阶段不用改模板 —— 设计阶段解析出设计单位，施工阶段解析出总包单位。
+      </p>
+      <p>
+        相关单位可以有<b>多个</b>（如设计阶段是监理 + 政府审查），
+        是<b>并列任务、各签各的</b>；必须全部签完才推进到下一节点。
+      </p>
+      <div class="warnbox">
+        这里踩过一个真实缺陷：判断"任务是否指派给你"时只取了<b>一条</b>任务，
+        导致并列任务里另一个单位的人被误判成"非处理人"，
+        进而被要求编辑权限而拒绝其签认 —— 而监理根本没有编辑权限，直接卡死。
+        已改为取<b>本节点全部待办任务</b>再找属于自己的那条。
+      </div>
+    </div>
+
+    <div class="card r3">
+      <h3><span class="n2">2</span>责任可追溯：谁上传、谁签认、文件在谁手上</h3>
+      <p>
+        台账每一行都给出<b>主办单位</b>（该阶段矩阵里的主要责任单位）——
+        文件出问题就找它；以及<b>当前待签单位</b> ——
+        也就是"文件现在在谁手上"。
+      </p>
+      <p>
+        每一次上传与签认都记录<b>操作人姓名 + 工号</b>，
+        形成完整签认轨迹（谁签的、什么意见、什么时候）。
+        台账不引入新表，全部由 document / document_version / workflow_task 推导，
+        <b>保证与状态机、流程引擎的判定永远一致</b>。
+      </p>
+      <div class="warnbox">
+        同时踩到：退回后流程新建一轮回到首节点，状态按"当前节点"映射又变成
+        <b>校核中</b> —— 提交人无法编辑只能干等。已改为退回时显式回到草稿态。
+      </div>
+    </div>
+
+    <div class="card r3">
+      <h3><span class="n2">3</span>敏感等级：按责任等级限定可见范围</h3>
+      <p>
+        四档：公开 / 内部 / 受限 / 机密。
+        规则：<b>具备编辑权限（即该阶段主办单位）→ 可看「受限」；否则最高「内部」</b>。
+      </p>
+      <p>
+        这条直接作用于 AI 检索：同一个问题，不同单位检索到的证据不同 ——
+        因为勘察报告是「受限」级，非设计单位检索不到。
+      </p>
+      <div class="warnbox">
+        <b>前端隐藏按钮只是体验，不是安全。</b>
+        所有校验必须在后端完成；权限过滤在 SQL 层，不是拿到数据后再筛。
+      </div>
+    </div>
+  </div>
+
+  <div class="trace">
+    <div class="trace-h"><span class="trace-bar"></span>文件从上传到生效：每一次操作都看得见</div>
+    <div class="trace-body">
+      <div class="tline">
+        <div class="tnode">
+          <div class="tdot">1</div>
+          <div class="tt">上传版本</div>
+          <div class="td">
+            主办单位任一成员均可上传<br>
+            <span class="tcode">记录 created_by + 工号</span>
+          </div>
+        </div>
+        <div class="tnode">
+          <div class="tdot">2</div>
+          <div class="tt">提交签认</div>
+          <div class="td">
+            生成流程实例，按矩阵派任务<br>
+            <span class="tcode">状态 → 校核中</span>
+          </div>
+        </div>
+        <div class="tnode">
+          <div class="tdot a">3</div>
+          <div class="tt">主办单位确认</div>
+          <div class="td">
+            <code>{PRIMARY}</code> 解析出的单位签认<br>
+            <span class="tcode">记录 acted_by + 意见 + 时间</span>
+          </div>
+        </div>
+        <div class="tnode">
+          <div class="tdot a">4</div>
+          <div class="tt">相关单位复核</div>
+          <div class="td">
+            <code>{RELATED}</code> 可多个单位并列<br>
+            <span class="tcode">全部签完才推进</span>
+          </div>
+        </div>
+        <div class="tnode">
+          <div class="tdot g">5</div>
+          <div class="tt">已批准</div>
+          <div class="td">
+            全部节点通过<br>
+            <span class="tcode">等主办单位点发布</span>
+          </div>
+        </div>
+        <div class="tnode">
+          <div class="tdot g">6</div>
+          <div class="tt">发布生效</div>
+          <div class="td">
+            成为唯一有效版本，旧版自动作废<br>
+            <span class="tcode">记录 published_by + 时间</span>
+          </div>
+        </div>
+      </div>
+      <div class="legend" style="border-top:none; background:transparent; padding:10px 0 0">
+        退回时回到第 1 步并<b>留下完整轮次记录</b> —— 谁退回的、什么理由，都在轨迹里。
+        这正是"文件丢了找得到责任人"的技术基础。
+      </div>
+    </div>
+  </div>
+
+  <div class="secret">
+    <div class="sl s0"><div class="sn">公开</div><div class="sv">PUBLIC · 序 0</div><div class="sw">对外可公开的资料</div></div>
+    <div class="sl s1"><div class="sn">内部</div><div class="sv">INTERNAL · 序 1</div><div class="sw">项目参与人均可见<br><b>仅查看权限者的上限</b></div></div>
+    <div class="sl s2"><div class="sn">受限</div><div class="sv">RESTRICTED · 序 2</div><div class="sw">勘察报告、计算书等<br><b>需该阶段主办单位才能看</b></div></div>
+    <div class="sl s3"><div class="sn">机密</div><div class="sv">SECRET · 序 3</div><div class="sw">仅系统管理员</div></div>
+  </div>
+  </section>
+
+  <div class="foot">
+    <span>数据来源：数据库实际结构（PRAGMA foreign_key_list）· <code>app/models/enums.py</code>（责任矩阵）· <code>app/core/permissions.py</code>（权限引擎）</span>
+    <span>桩基工程全生命周期管理平台 PILE·LCM · 以参与单位为主体 v0.2</span>
+  </div>
+</div>
+</body>
+</html>
