@@ -18,3 +18,4 @@ frontend/dist/
 
 # 运行时数据（storage 实际位置）
 *.log
+storage/
